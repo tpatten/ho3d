@@ -8,6 +8,7 @@ import pickle
 import math
 import sys
 import matplotlib.pyplot as plt
+import cv2
 
 """ General util functions. """
 def _assert_exist(p):
@@ -28,14 +29,12 @@ def projectPoints(xyz, K):
     uv = np.matmul(K, xyz.T).T
     return uv[:, :2] / uv[:, -1:]
 
-def loadPickleData(fName):
-    with open(fName, 'rb') as f:
-        try:
-            pickData = pickle.load(f, encoding='latin1')
-        except:
-            pickData = pickle.load(f)
-
-    return pickData
+def show2DBoundingBox(imgInOrg, bb):
+    """ Show bounding box on the image"""
+    imgIn = np.copy(imgInOrg)
+    imgIn = cv2.rectangle(imgIn, (int(bb[0]), int(bb[1])),
+                          (int(bb[2]), int(bb[3])), (0, 0, 255), thickness=3)
+    return imgIn
 
 def showHandJoints(imgInOrg, gtIn, filename=None):
     '''
@@ -83,44 +82,49 @@ def showHandJoints(imgInOrg, gtIn, filename=None):
 
     gtIn = np.round(gtIn).astype(np.int)
 
-    for joint_num in range(gtIn.shape[0]):
+    if gtIn.shape[0]==1:
+        imgIn = cv2.circle(imgIn, center=(gtIn[0][0], gtIn[0][1]), radius=3, color=joint_color_code[0],
+                             thickness=-1)
+    else:
 
-        color_code_num = (joint_num // 4)
-        if joint_num in [0, 4, 8, 12, 16]:
-            if PYTHON_VERSION == 3:
-                joint_color = list(map(lambda x: x + 35 * (joint_num % 4), joint_color_code[color_code_num]))
+        for joint_num in range(gtIn.shape[0]):
+
+            color_code_num = (joint_num // 4)
+            if joint_num in [0, 4, 8, 12, 16]:
+                if PYTHON_VERSION == 3:
+                    joint_color = list(map(lambda x: x + 35 * (joint_num % 4), joint_color_code[color_code_num]))
+                else:
+                    joint_color = map(lambda x: x + 35 * (joint_num % 4), joint_color_code[color_code_num])
+
+                cv2.circle(imgIn, center=(gtIn[joint_num][0], gtIn[joint_num][1]), radius=3, color=joint_color, thickness=-1)
             else:
-                joint_color = map(lambda x: x + 35 * (joint_num % 4), joint_color_code[color_code_num])
+                if PYTHON_VERSION == 3:
+                    joint_color = list(map(lambda x: x + 35 * (joint_num % 4), joint_color_code[color_code_num]))
+                else:
+                    joint_color = map(lambda x: x + 35 * (joint_num % 4), joint_color_code[color_code_num])
 
-            cv2.circle(imgIn, center=(gtIn[joint_num][0], gtIn[joint_num][1]), radius=3, color=joint_color, thickness=-1)
-        else:
-            if PYTHON_VERSION == 3:
-                joint_color = list(map(lambda x: x + 35 * (joint_num % 4), joint_color_code[color_code_num]))
-            else:
-                joint_color = map(lambda x: x + 35 * (joint_num % 4), joint_color_code[color_code_num])
+                cv2.circle(imgIn, center=(gtIn[joint_num][0], gtIn[joint_num][1]), radius=3, color=joint_color, thickness=-1)
 
-            cv2.circle(imgIn, center=(gtIn[joint_num][0], gtIn[joint_num][1]), radius=3, color=joint_color, thickness=-1)
+        for limb_num in range(len(limbs)):
 
-    for limb_num in range(len(limbs)):
+            x1 = gtIn[limbs[limb_num][0], 1]
+            y1 = gtIn[limbs[limb_num][0], 0]
+            x2 = gtIn[limbs[limb_num][1], 1]
+            y2 = gtIn[limbs[limb_num][1], 0]
+            length = ((x1 - x2) ** 2 + (y1 - y2) ** 2) ** 0.5
+            if length < 150 and length > 5:
+                deg = math.degrees(math.atan2(x1 - x2, y1 - y2))
+                polygon = cv2.ellipse2Poly((int((y1 + y2) / 2), int((x1 + x2) / 2)),
+                                           (int(length / 2), 3),
+                                           int(deg),
+                                           0, 360, 1)
+                color_code_num = limb_num // 4
+                if PYTHON_VERSION == 3:
+                    limb_color = list(map(lambda x: x + 35 * (limb_num % 4), joint_color_code[color_code_num]))
+                else:
+                    limb_color = map(lambda x: x + 35 * (limb_num % 4), joint_color_code[color_code_num])
 
-        x1 = gtIn[limbs[limb_num][0], 1]
-        y1 = gtIn[limbs[limb_num][0], 0]
-        x2 = gtIn[limbs[limb_num][1], 1]
-        y2 = gtIn[limbs[limb_num][1], 0]
-        length = ((x1 - x2) ** 2 + (y1 - y2) ** 2) ** 0.5
-        if length < 150 and length > 5:
-            deg = math.degrees(math.atan2(x1 - x2, y1 - y2))
-            polygon = cv2.ellipse2Poly((int((y1 + y2) / 2), int((x1 + x2) / 2)),
-                                       (int(length / 2), 3),
-                                       int(deg),
-                                       0, 360, 1)
-            color_code_num = limb_num // 4
-            if PYTHON_VERSION == 3:
-                limb_color = list(map(lambda x: x + 35 * (limb_num % 4), joint_color_code[color_code_num]))
-            else:
-                limb_color = map(lambda x: x + 35 * (limb_num % 4), joint_color_code[color_code_num])
-
-            cv2.fillConvexPoly(imgIn, polygon, color=limb_color)
+                cv2.fillConvexPoly(imgIn, polygon, color=limb_color)
 
 
     if filename is not None:
@@ -318,7 +322,7 @@ def read_obj(filename):
 
     return result
 
-""" Dataset related functions. """
+
 def db_size(set_name):
     """ Hardcoded size of the datasets. """
     if set_name == 'training':
@@ -328,48 +332,72 @@ def db_size(set_name):
     else:
         assert 0, 'Invalid choice.'
 
+def load_pickle_data(f_name):
+    """ Loads the pickle data """
+    if not os.path.exists(f_name):
+        raise Exception('Unable to find annotations picle file at %s. Aborting.'%fName)
+    with open(f_name, 'rb') as f:
+        try:
+            pickle_data = pickle.load(f, encoding='latin1')
+        except:
+            pickle_data = pickle.load(f)
 
-def load_db_annotation(base_path, set_name=None):
-    if set_name is None:
-        # only training set annotations are released so this is a valid default choice
-        set_name = 'training'
+    return pickle_data
 
-    print('Loading FreiHAND dataset index ...')
-    t = time.time()
+def project_3D_points(cam_mat, pts3D, is_OpenGL_coords=True):
+    '''
+    Function for projecting 3d points to 2d
+    :param camMat: camera matrix
+    :param pts3D: 3D points
+    :param isOpenGLCoords: If True, hand/object along negative z-axis. If False hand/object along positive z-axis
+    :return:
+    '''
+    assert pts3D.shape[-1] == 3
+    assert len(pts3D.shape) == 2
 
-    # assumed paths to data containers
-    k_path = os.path.join(base_path, '%s_K.json' % set_name)
-    mano_path = os.path.join(base_path, '%s_mano.json' % set_name)
-    xyz_path = os.path.join(base_path, '%s_xyz.json' % set_name)
+    coord_change_mat = np.array([[1., 0., 0.], [0, -1., 0.], [0., 0., -1.]], dtype=np.float32)
+    if is_OpenGL_coords:
+        pts3D = pts3D.dot(coord_change_mat.T)
 
-    # load if exist
-    K_list = json_load(k_path)
-    mano_list = json_load(mano_path)
-    xyz_list = json_load(xyz_path)
+    proj_pts = pts3D.dot(cam_mat.T)
+    proj_pts = np.stack([proj_pts[:,0]/proj_pts[:,2], proj_pts[:,1]/proj_pts[:,2]],axis=1)
 
-    # should have all the same length
-    assert len(K_list) == len(mano_list), 'Size mismatch.'
-    assert len(K_list) == len(xyz_list), 'Size mismatch.'
+    assert len(proj_pts.shape) == 2
 
-    print('Loading of %d samples done in %.2f seconds' % (len(K_list), time.time()-t))
-    return zip(K_list, mano_list, xyz_list)
+    return proj_pts
 
+def read_RGB_img(base_dir, seq_name, file_id, split):
+    """Read the RGB image in dataset"""
+    img_filename = os.path.join(base_dir, split, seq_name, 'rgb', file_id + '.png')
 
-def read_img(idx, base_path, set_name, version=None):
-    if version is None:
-        version = sample_version.gs
+    _assert_exist(img_filename)
 
-    if set_name == 'evaluation':
-        assert version == sample_version.gs, 'This the only valid choice for samples from the evaluation split.'
+    img = cv2.imread(img_filename)
 
-    img_rgb_path = os.path.join(base_path, set_name, 'rgb',
-                                '%08d.jpg' % sample_version.map_id(idx, version))
-    _assert_exist(img_rgb_path)
-    return io.imread(img_rgb_path)
+    return img
 
 
-def read_msk(idx, base_path):
-    mask_path = os.path.join(base_path, 'training', 'mask',
-                             '%08d.jpg' % idx)
-    _assert_exist(mask_path)
-    return io.imread(mask_path)
+def read_depth_img(base_dir, seq_name, file_id, split):
+    """Read the depth image in dataset and decode it"""
+    depth_filename = os.path.join(base_dir, split, seq_name, 'depth', file_id + '.png')
+
+    _assert_exist(depth_filename)
+
+    depth_scale = 0.00012498664727900177
+    depth_img = cv2.imread(depth_filename)
+
+    dpt = depth_img[:, :, 2] + depth_img[:, :, 1] * 256
+    dpt = dpt * depth_scale
+
+    return dpt
+
+def read_annotation(base_dir, seq_name, file_id, split):
+    meta_filename = os.path.join(base_dir, split, seq_name, 'meta', file_id + '.pkl')
+
+    _assert_exist(meta_filename)
+
+    pkl_data = load_pickle_data(meta_filename)
+
+    return pkl_data
+
+

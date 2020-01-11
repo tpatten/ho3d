@@ -11,7 +11,8 @@ def install(package):
     if hasattr(pip, 'main'):
         pip.main(['install', package])
     else:
-        pip._internal.main(['install', package])
+        from pip._internal.main import main as pipmain
+        pipmain(['install', package])
 
 try:
     import open3d as o3d
@@ -27,7 +28,7 @@ except:
 
 
 try:
-    from utils.fh_utils import *
+    from utils.vis_utils import *
     from utils.eval_util import EvalUtil
 
 except:
@@ -66,6 +67,28 @@ def calculate_fscore(gt, pr, th=0.01):
         precision = 0
         recall = 0
     return fscore, precision, recall
+
+def align_sc_tr(mtx1, mtx2):
+    """ Align the 3D joint location with the ground truth by scaling and translation """
+
+    predCurr = mtx2.copy()
+    # normalize the predictions
+    s = np.sqrt(np.sum(np.square(predCurr[9] - predCurr[0])))
+    predCurr = predCurr / s
+
+    # get the scale of the ground truth
+    sGT = np.sqrt(np.sum(np.square(mtx1[9] - mtx1[0])))
+
+    # make predictions scale same as ground truth scale
+    predCurr = predCurr * sGT
+
+    # make preditions translation of the wrist joint same as ground truth
+    predCurrRel = predCurr - predCurr[0:1, :]
+    preds_sc_tr_al = predCurrRel + mtx1[0:1, :]
+
+    return preds_sc_tr_al
+
+
 
 
 def align_w_scale(mtx1, mtx2, return_trafo=False):
@@ -185,6 +208,7 @@ def main(gt_path, pred_path, output_dir, pred_file_name=None, set_name=None):
     # load eval annotations
     xyz_list, verts_list = json_load(os.path.join(gt_path, '%s_xyz.json' % set_name)), json_load(os.path.join(gt_path, '%s_verts.json' % set_name))
 
+
     # load predicted values
     pred_file = _search_pred_file(pred_path, pred_file_name)
     print('Loading predictions from %s' % pred_file)
@@ -196,7 +220,7 @@ def main(gt_path, pred_path, output_dir, pred_file_name=None, set_name=None):
     assert len(pred[1]) == len(xyz_list), 'Expected format mismatch.'
 
     # init eval utils
-    eval_xyz, eval_xyz_aligned = EvalUtil(), EvalUtil()
+    eval_xyz, eval_xyz_procrustes_aligned, eval_xyz_sc_tr_aligned = EvalUtil(), EvalUtil(), EvalUtil()
     eval_mesh_err, eval_mesh_err_aligned = EvalUtil(num_kp=778), EvalUtil(num_kp=778)
     f_score, f_score_aligned = list(), list()
     f_threshs = [0.005, 0.015]
@@ -240,6 +264,14 @@ def main(gt_path, pred_path, output_dir, pred_file_name=None, set_name=None):
                 verts_pred
             )
 
+        # scale and translation aligned predictions for xyz
+        xyz_pred_sc_tr_aligned = align_sc_tr(xyz, xyz_pred)
+        eval_xyz_sc_tr_aligned.feed(
+            xyz,
+            np.ones_like(xyz[:, 0]),
+            xyz_pred_sc_tr_aligned
+        )
+
         # align predictions
         xyz_pred_aligned = align_w_scale(xyz, xyz_pred)
         if shape_is_mano:
@@ -250,7 +282,7 @@ def main(gt_path, pred_path, output_dir, pred_file_name=None, set_name=None):
             verts_pred_aligned = align_by_trafo(verts_pred, trafo)
 
         # Aligned errors
-        eval_xyz_aligned.feed(
+        eval_xyz_procrustes_aligned.feed(
             xyz,
             np.ones_like(xyz[:, 0]),
             xyz_pred_aligned
@@ -279,9 +311,14 @@ def main(gt_path, pred_path, output_dir, pred_file_name=None, set_name=None):
     print('Evaluation 3D KP results:')
     print('auc=%.3f, mean_kp3d_avg=%.2f cm' % (xyz_auc3d, xyz_mean3d * 100.0))
 
-    xyz_al_mean3d, _, xyz_al_auc3d, pck_xyz_al, thresh_xyz_al = eval_xyz_aligned.get_measures(0.0, 0.05, 100)
-    print('Evaluation 3D KP ALIGNED results:')
-    print('auc=%.3f, mean_kp3d_avg=%.2f cm\n' % (xyz_al_auc3d, xyz_al_mean3d * 100.0))
+    xyz_procrustes_al_mean3d, _, xyz_procrustes_al_auc3d, pck_xyz_procrustes_al, thresh_xyz_procrustes_al = eval_xyz_procrustes_aligned.get_measures(0.0, 0.05, 100)
+    print('Evaluation 3D KP PROCRUSTES ALIGNED results:')
+    print('auc=%.3f, mean_kp3d_avg=%.2f cm' % (xyz_procrustes_al_auc3d, xyz_procrustes_al_mean3d * 100.0))
+
+    xyz_sc_tr_al_mean3d, _, xyz_sc_tr_al_auc3d, pck_xyz_sc_tr_al, thresh_xyz_sc_tr_al = eval_xyz_sc_tr_aligned.get_measures(0.0, 0.05, 100)
+    print('Evaluation 3D KP SCALE-TRANSLATION ALIGNED results:')
+    print('auc=%.3f, mean_kp3d_avg=%.2f cm\n' % (xyz_sc_tr_al_auc3d, xyz_sc_tr_al_mean3d * 100.0))
+
 
     if shape_is_mano:
         mesh_mean3d, _, mesh_auc3d, pck_mesh, thresh_mesh = eval_mesh_err.get_measures(0.0, 0.05, 100)
@@ -309,11 +346,14 @@ def main(gt_path, pred_path, output_dir, pred_file_name=None, set_name=None):
     score_path = os.path.join(output_dir, 'scores.txt')
     with open(score_path, 'w') as fo:
         xyz_mean3d *= 100
-        xyz_al_mean3d *= 100
+        xyz_procrustes_al_mean3d *= 100
+        xyz_sc_tr_al_mean3d *= 100
         fo.write('xyz_mean3d: %f\n' % xyz_mean3d)
         fo.write('xyz_auc3d: %f\n' % xyz_auc3d)
-        fo.write('xyz_al_mean3d: %f\n' % xyz_al_mean3d)
-        fo.write('xyz_al_auc3d: %f\n' % xyz_al_auc3d)
+        fo.write('xyz_procrustes_al_mean3d: %f\n' % xyz_procrustes_al_mean3d)
+        fo.write('xyz_procrustes_al_auc3d: %f\n' % xyz_procrustes_al_auc3d)
+        fo.write('xyz_scale_trans_al_mean3d: %f\n' % xyz_sc_tr_al_mean3d)
+        fo.write('xyz_scale_trans_al_auc3d: %f\n' % xyz_sc_tr_al_auc3d)
 
         mesh_mean3d *= 100
         mesh_al_mean3d *= 100
@@ -329,7 +369,9 @@ def main(gt_path, pred_path, output_dir, pred_file_name=None, set_name=None):
         output_dir,
         [
             curve(thresh_xyz*100, pck_xyz, 'Distance in cm', 'Percentage of correct keypoints', 'PCK curve for aligned keypoint error'),
-            curve(thresh_xyz_al*100, pck_xyz_al, 'Distance in cm', 'Percentage of correct keypoints', 'PCK curve for aligned keypoint error'),
+            curve(thresh_xyz_procrustes_al*100, pck_xyz_procrustes_al, 'Distance in cm', 'Percentage of correct keypoints', 'PCK curve for procrustes aligned keypoint error'),
+            curve(thresh_xyz_sc_tr_al * 100, pck_xyz_sc_tr_al, 'Distance in cm',
+                  'Percentage of correct keypoints', 'PCK curve for scale-translation aligned keypoint error'),
             curve(thresh_mesh*100, pck_mesh, 'Distance in cm', 'Percentage of correct vertices', 'PCV curve for mesh error'),
             curve(thresh_mesh_al*100, pck_mesh_al, 'Distance in cm', 'Percentage of correct vertices', 'PCV curve for aligned mesh error')
         ]

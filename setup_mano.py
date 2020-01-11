@@ -34,17 +34,38 @@ def md5(fname):
     return hash_md5.hexdigest()
 
 def _patch_mano_loader():
-    file = 'utils/mano_core/mano_loader.py'
+    file = 'mano/webuser/smpl_handpca_wrapper_HAND_only.py'
 
     replace(file, *zip(*
         [
-            (26, '    from posemapper import posemap'),
-            (62, 'def load_model(fname_or_dict, ncomps=6, flat_hand_mean=False, v_template=None, use_pca=True):'),
-            (66, '    from verts import verts_core'),
-            (80, '    if use_pca:\n        hands_components = smpl_data[''hands_components'']  # PCA components\n    else:\n        hands_components = np.eye(45)  # directly modify 15x3 articulation angles'),
-            (131,'    result.dd = dd'),
+            (23, '    import pickle'),
+            (26, '    from mano.webuser.posemapper import posemap'),
+            (66, '    from mano.webuser.verts import verts_core'),
+            (92, '    smpl_data[\'fullpose\'] = ch.array(smpl_data[\'fullpose\'].r)'),
+            (74, '        smpl_data = pickle.load(open(fname_or_dict, \'rb\'))')
         ]
     ))
+
+    file = 'mano/webuser/verts.py'
+
+    replace(file, *zip(*
+                       [
+                           (29, 'import mano.webuser.lbs as lbs'),
+                           (30, 'from mano.webuser.posemapper import posemap'),
+                       ]
+                       ))
+
+    file = 'mano/webuser/lbs.py'
+
+    replace(file, *zip(*
+                       [
+                           (27, 'from mano.webuser.posemapper import posemap'),
+                           (38, '        from mano.webuser.posemapper import Rodrigues'),
+                           (77, '    v = v[:,:3]'),
+                           (78, '    for tp in [745, 320, 444, 555, 657]:  # THUMB, INDEX, MIDDLE, RING, PINKY'),
+                           (79, '        A_global.append(xp.vstack((xp.hstack((np.zeros((3, 3)), v[tp, :3].reshape((3, 1)))), xp.array([[0.0, 0.0, 0.0, 1.0]]))))')
+                       ]
+                       ))
 
 
 def patch_files():
@@ -64,29 +85,19 @@ if __name__ == '__main__':
         'webuser/posemapper.py',
         'webuser/lbs.py',
         'webuser/smpl_handpca_wrapper_HAND_only.py',
+        '__init__.py',
+        'webuser/__init__.py'
     ]
 
-    # how to rename them to be used in our repository
-    files_copy_to = [
-        'data/MANO_RIGHT.pkl',
-        'utils/mano_core/verts.py',
-        'utils/mano_core/posemapper.py',
-        'utils/mano_core/lbs.py',
-        'utils/mano_core/mano_loader.py',
-    ]
 
     if args.clear:
-        for f in files_copy_to:
-            if os.path.exists(f):
-                os.remove(f)
-            if '.py' in f:
-                f2 = f.replace('.py', '.pyc')
-                if os.path.exists(f2):
-                    os.remove(f2)
+        if os.path.exists('./mano'):
+            shutil.rmtree('./mano')
         print('Repository cleaned.')
         exit()
 
     # check input files
+    files_copy_to = [os.path.join('mano', f) for f in files_needed]
     files_needed = [os.path.join(args.mano_path, f) for f in files_needed]
     assert all([os.path.exists(f) for f in files_needed]), 'Could not find one of the needed MANO files in the directory you provided.'
 
@@ -96,11 +107,19 @@ if __name__ == '__main__':
         '998c30fd83c473da6178aa2cb23b6a5d',
         'c5e9eacc535ec7d03060e0c8d6f80f45',
         'd11c767d5db8d4a55b4ece1c46a4e4ac',
-        '5afc7a3eb1a6ce0c2dac1483338a5f58'
+        '5afc7a3eb1a6ce0c2dac1483338a5f58',
+        'fd4025c7ee315dc1ec29ac94e4105825',
+        'a64cc3c8d87216123a1a6da11eab0a85'
     ]
     assert all([md5(f) == gt for f, gt in zip(files_needed, hash_ground_truth)]), 'Hash sum of provided files differs from what was expected.'
 
     # copy files
+    if not os.path.exists('mano'):
+        os.mkdir('mano')
+    if not os.path.exists('mano/models'):
+        os.mkdir('mano/models')
+    if not os.path.exists('mano/webuser'):
+        os.mkdir('mano/webuser')
     for a, b in zip(files_needed, files_copy_to):
         shutil.copy2(a, b)
 

@@ -1,252 +1,198 @@
 """
 Visualize the projections in published HO-3D dataset
 """
-import os
 from os.path import join
-import matplotlib.pyplot as plt
-import numpy as np
-import cv2
+import pip
 import argparse
+from utils.vis_utils import *
+import random
 
-baseDir = './'
+def install(package):
+    if hasattr(pip, 'main'):
+        pip.main(['install', package])
+    else:
+        from pip._internal.main import main as pipmain
+        pipmain(['install', package])
+
+try:
+    import matplotlib.pyplot as plt
+except:
+    install('matplotlib')
+    import matplotlib.pyplot as plt
+
+try:
+    import chumpy as ch
+except:
+    install('chumpy')
+    import chumpy as ch
+
+try:
+    import pickle
+except:
+    install('pickle')
+    import pickle
+
+import cv2
+from mpl_toolkits.mplot3d import Axes3D
+
+MANO_MODEL_PATH = './mano/models/MANO_RIGHT.pkl'
+
+# mapping of joints from MANO model order to simple order(thumb to pinky finger)
+jointsMapManoToSimple = [0,
+                         13, 14, 15, 16,
+                         1, 2, 3, 17,
+                         4, 5, 6, 18,
+                         10, 11, 12, 19,
+                         7, 8, 9, 20]
+
+if not os.path.exists(MANO_MODEL_PATH):
+    raise Exception('MANO model missing! Please copy the mano model to \'mano\' folder in root directory.')
+else:
+    from mano.webuser.smpl_handpca_wrapper_HAND_only import load_model
 
 
-seqName = 'MC1'
-
-fileID = ['0025']
-
-
-def lineParser(line, annoDict):
+def forwardKinematics(fullpose, trans, beta):
     '''
-    Parses a line in the 'anno.txt' and creates a entry in dict with id as key
-    :param line: line from 'anno.txt'
-    :param annoDict: dict in which an entry should be added
-    :return:
+    MANO parameters --> 3D pts, mesh
+    :param fullpose:
+    :param trans:
+    :param beta:
+    :return: 3D pts of size (21,3)
     '''
-    lineList = line.split()
-    id = lineList[0]
-    objID = lineList[1]
-    paramsList = list(map(float, lineList[2:]))
 
-    assert id not in annoDict.keys(), 'Something wrong with the annotation file...'
+    assert fullpose.shape == (48,)
+    assert trans.shape == (3,)
+    assert beta.shape == (10,)
 
-    annoDict[id]= {
-        'objID': objID,
-        'handJoints': np.reshape(np.array(paramsList[:63]), [21,3]),
-        'handPose': np.array(paramsList[63:63 + 48]),
-        'handTrans': np.array(paramsList[63 + 48:63 + 48 + 3]),
-        'handBeta': np.array(paramsList[63 + 48 + 3: 63 + 48 + 3 + 10]),
-        'objRot': np.array(paramsList[63 + 48 + 3 + 10: 63 + 48 + 3 + 10 + 3]),
-        'objTrans': np.array(paramsList[63 + 48 + 3 + 10 + 3: 63 + 48 + 3 + 10 + 3 + 3])
-        }
+    m = load_model(MANO_MODEL_PATH, ncomps=6, flat_hand_mean=True)
+    m.fullpose[:] = fullpose
+    m.trans[:] = trans
+    m.betas[:] = beta
 
+    return m.J_transformed.r, m
 
-    return annoDict
-
-def parseAnnoTxt(filename):
-    '''
-    Parse the 'anno.txt'
-    :param filename: path to 'anno.txt'
-    :return: dict with id as keys
-    '''
-    ftxt = open(filename, 'r')
-    annoLines = ftxt.readlines()
-    annoDict = {}
-    for line in annoLines:
-        lineParser(line, annoDict)
-
-    return annoDict
-
-def decodeDepthImg(inFileName, dsize=None):
-    '''
-    Decode the depth image to depth map in meters
-    :param inFileName: input file name
-    :return: depth map (float) in meters
-    '''
-    depthScale = 0.00012498664727900177
-    depthImg = cv2.imread(inFileName)
-    if dsize is not None:
-        depthImg = cv2.resize(depthImg, dsize, interpolation=cv2.INTER_CUBIC)
-
-    dpt = depthImg[:, :, 0] + depthImg[:, :, 1] * 256
-    dpt = dpt * depthScale
-
-    return dpt
-
-def project3DPoints(camMat, pts3D, isOpenGLCoords=True):
-    '''
-    Function for projecting 3d points to 2d
-    :param camMat: camera matrix
-    :param pts3D: 3D points
-    :param isOpenGLCoords: If True, hand/object along negative z-axis. If False hand/object along positive z-axis
-    :return:
-    '''
-    assert pts3D.shape[-1] == 3
-    assert len(pts3D.shape) == 2
-
-    coordChangeMat = np.array([[1., 0., 0.], [0, -1., 0.], [0., 0., -1.]], dtype=np.float32)
-    if isOpenGLCoords:
-        pts3D = pts3D.dot(coordChangeMat.T)
-
-    projPts = pts3D.dot(camMat.T)
-    projPts = np.stack([projPts[:,0]/projPts[:,2], projPts[:,1]/projPts[:,2]],axis=1)
-
-    assert len(projPts.shape) == 2
-
-    return projPts
-
-def showHandJoints(imgIn, gtIn, estIn=None, filename=None, upscale=1, lineThickness=3):
-    '''
-    Utility function for displaying hand annotations
-    :param imgIn: image on which annotation is shown
-    :param gtIn: ground truth annotation
-    :param estIn: estimated keypoints
-    :param filename: dump image name
-    :param upscale: scale factor
-    :param lineThickness:
-    :return:
-    '''
-    jointConns = [[0, 1, 2, 3, 17], [0, 4, 5, 6, 18], [0, 10, 11, 12, 19], [0, 7, 8, 9, 20], [0, 13, 14, 15, 16]]
-    jointColsGt = [(255,0,0),(0,255,0),(0,0,255),(0,255,255),(255,0,255)]
-    jointColsEst  = []
-    for col in jointColsGt:
-        newCol = (col[0]+col[1]+col[2])/3
-        jointColsEst.append((newCol, newCol, newCol))
-    # draws lines connected using jointConns
-    img = np.zeros((imgIn.shape[0], imgIn.shape[1], imgIn.shape[2]), dtype=np.uint8)
-    img[:, :, :] = (imgIn).astype(np.uint8)
-
-    img = cv2.resize(img, (upscale * imgIn.shape[1], upscale * imgIn.shape[0]), interpolation=cv2.INTER_CUBIC)
-    if gtIn is not None:
-        gt = gtIn.copy() * upscale
-    if estIn is not None:
-        est = estIn.copy() * upscale
-
-    for i in range(len(jointConns)):
-        for j in range(len(jointConns[i]) - 1):
-            jntC = jointConns[i][j]
-            jntN = jointConns[i][j+1]
-            if gtIn is not None:
-                cv2.line(img, (int(gt[jntC,0]), int(gt[jntC,1])), (int(gt[jntN,0]), int(gt[jntN,1])), jointColsGt[i], lineThickness)
-            if estIn is not None:
-                cv2.line(img, (int(est[jntC,0]), int(est[jntC,1])), (int(est[jntN,0]), int(est[jntN,1])), jointColsEst[i], lineThickness)
-
-    if filename is not None:
-        cv2.imwrite(filename, img)
-
-    return img
-
-def showObjJoints(imgIn, gtIn, estIn=None, filename=None, upscale=1, lineThickness=3):
-    '''
-    Utility function for displaying object annotations
-    :param imgIn: image on which annotation is shown
-    :param gtIn: ground truth annotation
-    :param estIn: estimated keypoints
-    :param filename: dump image name
-    :param upscale: scale factor
-    :param lineThickness:
-    :return:
-    '''
-    jointConns = [[0, 1, 3, 2, 0], [4, 5, 7, 6, 4], [0, 4], [1, 5], [2, 6], [3,7]]
-    jointColsGt = (255,255,0)
-    newCol = (jointColsGt[0] + jointColsGt[1] + jointColsGt[2]) / 3
-    jointColsEst  = (newCol, newCol, newCol)
-
-    # draws lines connected using jointConns
-    img = np.zeros((imgIn.shape[0], imgIn.shape[1], imgIn.shape[2]), dtype=np.uint8)
-    img[:, :, :] = (imgIn).astype(np.uint8)
-
-    img = cv2.resize(img, (upscale * imgIn.shape[1], upscale * imgIn.shape[0]), interpolation=cv2.INTER_CUBIC)
-    if gtIn is not None:
-        gt = gtIn.copy() * upscale
-    if estIn is not None:
-        est = estIn.copy() * upscale
-
-    for i in range(len(jointConns)):
-        for j in range(len(jointConns[i]) - 1):
-            jntC = jointConns[i][j]
-            jntN = jointConns[i][j+1]
-            if gtIn is not None:
-                cv2.line(img, (int(gt[jntC,0]), int(gt[jntC,1])), (int(gt[jntN,0]), int(gt[jntN,1])), jointColsGt, lineThickness)
-            if estIn is not None:
-                cv2.line(img, (int(est[jntC,0]), int(est[jntC,1])), (int(est[jntN,0]), int(est[jntN,1])), jointColsEst, lineThickness)
-
-    if filename is not None:
-        cv2.imwrite(filename, img)
-
-    return img
 
 if __name__ == '__main__':
+
+    # parse the input arguments
     ap = argparse.ArgumentParser()
-    ap.add_argument("-seq", "--sequence", required=True,
+    ap.add_argument("ho3d_path", type=str, help="Path to HO3D dataset")
+    ap.add_argument("ycbModels_path", type=str, help="Path to ycb models directory")
+    ap.add_argument("-split", required=False, type=str,
+                    help="split type", choices=['train', 'evaluation'], default='train')
+    ap.add_argument("-seq", required=False, type=str,
                     help="sequence name")
-    ap.add_argument("-id", "--imageID", required=True,
+    ap.add_argument("-id", required=False, type=str,
                     help="image ID")
+    ap.add_argument("-visType", required=False,
+                    help="Type of visualization", choices=['open3d', 'matplotlib'], default='matplotlib')
     args = vars(ap.parse_args())
 
-    # if 'seq' not in args.keys():
-    #     args['seq'] = 'MC1'
-    #
-    # if 'id' not in args.keys():
-    #     args['id'] = '0025'
+    baseDir = args['ho3d_path']
+    YCBModelsDir = args['ycbModels_path']
+    split = args['split']
+
+    # some checks to decide if visualizing one single image or randomly picked images
+    if args['seq'] is None:
+        args['seq'] = random.choice(os.listdir(join(baseDir, split)))
+        runLoop = True
+    else:
+        runLoop = False
+
+    if args['id'] is None:
+        args['id'] = random.choice(os.listdir(join(baseDir, split, args['seq'], 'rgb'))).split('.')[0]
+    else:
+        pass
 
 
-    id = args['id']
-    seq = args['seq']
+    while(True):
+        seqName = args['seq']
+        id = args['id']
 
-    # parse the annotation file for the sequence
-    annoFilename = join(baseDir, 'sequences', seqName, 'anno.txt')
-    annoDict = parseAnnoTxt(annoFilename)
+        # read image, depths maps and annotations
+        img = read_RGB_img(baseDir, seqName, id, split)
+        depth = read_depth_img(baseDir, seqName, id, split)
+        anno = read_annotation(baseDir, seqName, id, split)
 
-    assert id in annoDict.keys(), 'File id %s not present in sequence %s.' % (id, seqName)
+        # get object 3D corner locations for the current pose
+        objCorners = anno['objCorners3DRest']
+        objCornersTrans = np.matmul(objCorners, cv2.Rodrigues(anno['objRot'])[0].T) + anno['objTrans']
 
-    # camera properties
-    f = np.array([617.343, 617.343], dtype=np.float32)
-    c = np.array([312.42, 241.42], dtype=np.float32)
-    w = 640
-    h = 480
-    camMat = np.array([[f[0], 0., c[0]],[0., f[1], c[1]],[0., 0., 1.]])
+        # get the hand Mesh from MANO model for the current pose
+        if split == 'train':
+            handJoints3D, handMesh = forwardKinematics(anno['handPose'], anno['handTrans'], anno['handBeta'])
 
-    # get the annotations for the current id
-    anno = annoDict[id]
+        # project to 2D
+        if split == 'train':
+            handKps = project_3D_points(anno['camMat'], handJoints3D, is_OpenGL_coords=True)
+        else:
+            # Only root joint available in evaluation split
+            handKps = project_3D_points(anno['camMat'], np.expand_dims(anno['handJoints3D'],0), is_OpenGL_coords=True)
+        objKps = project_3D_points(anno['camMat'], objCornersTrans, is_OpenGL_coords=True)
 
-    # read image, depths and object corner files
-    imgFilename = join(baseDir, 'sequences', seqName, 'RGB', 'color_'+id+'.png')
-    depthFilename = join(baseDir, 'sequences', seqName, 'Depth', 'depth_'+id+'.png')
-    objCornersFilename = join(baseDir, 'models', anno['objID'], 'corners.npy')
+        # Visualize
+        if args['visType'] == 'open3d':
+            # open3d visualization
 
-    objCorners = np.load(objCornersFilename)
-    img = cv2.imread(imgFilename)
-    depth = decodeDepthImg(depthFilename)
+            if not os.path.exists(os.path.join(YCBModelsDir, 'models', anno['objName'], 'textured_simple.obj')):
+                raise Exception('3D object models not available in %s'%(os.path.join(YCBModelsDir, 'models', anno['objName'], 'textured_simple.obj')))
 
-    # transform the object corners
-    objCornersTrans = np.matmul(objCorners, cv2.Rodrigues(anno['objRot'])[0].T) + anno['objTrans']
+            # load object model
+            objMesh = read_obj(os.path.join(YCBModelsDir, 'models', anno['objName'], 'textured_simple.obj'))
 
-    # project 3D keypoints to image place
-    handKps = project3DPoints(camMat, anno['handJoints'], isOpenGLCoords=True)
-    objKps = project3DPoints(camMat, objCornersTrans, isOpenGLCoords=True)
+            # apply current pose to the object model
+            objMesh.v = np.matmul(objMesh.v, cv2.Rodrigues(anno['objRot'])[0].T) + anno['objTrans']
 
-    # show the 2D keypoints on image
-    imgAnno = showHandJoints(img, handKps, lineThickness=2)
-    imgAnno = showObjJoints(imgAnno, objKps, lineThickness=2)
+            # show
+            if split == 'train':
+                open3dVisualize([handMesh, objMesh], ['r', 'g'])
+            else:
+                open3dVisualize([objMesh], ['r', 'g'])
 
-    # visualize
-    fig = plt.figure()
-    ax = fig.subplots(2, 1)
-    ax[0].imshow(imgAnno[:,:,[2,1,0]])
-    ax[1].imshow(depth)
-    plt.show()
+        elif args['visType'] == 'matplotlib':
 
+            # draw 2D projections of annotations on RGB image
+            if split == 'train':
+                imgAnno = showHandJoints(img, handKps[jointsMapManoToSimple])
+            else:
+                # show only projection of root joint in evaluation split
+                imgAnno = showHandJoints(img, handKps)
+                # show the hand bounding box
+                imgAnno = show2DBoundingBox(imgAnno, anno['handBoundingBox'])
+            imgAnno = showObjJoints(imgAnno, objKps, lineThickness=2)
 
+            # create matplotlib window
+            fig = plt.figure(figsize=(2, 2))
+            figManager = plt.get_current_fig_manager()
+            figManager.resize(*figManager.window.maxsize())
 
+            # show RGB image
+            ax0 = fig.add_subplot(2, 2, 1)
+            ax0.imshow(img[:, :, [2, 1, 0]])
+            ax0.title.set_text('RGB Image')
 
+            # show depth map
+            ax1 = fig.add_subplot(2, 2, 2)
+            ax1.imshow(depth)
+            ax1.title.set_text('Depth Map')
 
+            # show 3D hand mesh
+            ax2 = fig.add_subplot(2, 2, 3, projection="3d")
+            if split=='train':
+                plot3dVisualize(ax2, handMesh, flip_x=False, isOpenGLCoords=True, c="r")
+            ax2.title.set_text('Hand Mesh')
 
+            # show 2D projections of annotations on RGB image
+            ax3 = fig.add_subplot(2, 2, 4)
+            ax3.imshow(imgAnno[:, :, [2, 1, 0]])
+            ax3.title.set_text('3D Annotations projected to 2D')
 
+            plt.show()
+        else:
+            raise Exception('Unknown visualization type')
 
-
-
-
-
-
-
+        if runLoop:
+            args['seq'] = random.choice(os.listdir(join(baseDir, split)))
+            args['id'] = random.choice(os.listdir(join(baseDir, split, args['seq'], 'rgb'))).split('.')[0]
+        else:
+            break
