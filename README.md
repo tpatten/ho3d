@@ -29,7 +29,7 @@ This repository contains a collection of scripts for:
     ```
     http://mano.is.tue.mpg.de
     ```
-3. Assuming ${MANO_PATH} contains the path to where you unpacked the downloaded archive use the provided script to setup the MANO folder as required.
+3. Assuming ${MANO_PATH} contains the path to where you unpacked the downloaded archive, use the provided script to setup the MANO folder as required.
     ```
     python setup_mano.py ${MANO_PATH}
     
