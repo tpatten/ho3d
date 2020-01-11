@@ -90,7 +90,7 @@ for non-commercial purposes. When downloading the dataset you agree to (unless w
 not redistribute, modificate, or commercial usage of this dataset in any way or form, either partially or entirely. 
 If using this dataset, please cite the corresponding paper.
 
-    ```
+    
 	@ARTICLE{hampali2019honnotate,
     	      title={HOnnotate: A method for 3D Annotation of Hand and Objects Poses},
               author={Shreyas Hampali and Mahdi Rad and Markus Oberweger and Vincent Lepetit},
@@ -99,7 +99,7 @@ If using this dataset, please cite the corresponding paper.
               archivePrefix={arXiv},
               primaryClass={cs.CV}
              }
-    ```
+    
 # Acknowledgments
 
 1. The evaluation scripts used in the HO3D challenge have been mostly re-purposed from [Freihand challenge](https://github.com/lmb-freiburg/freihand). We
