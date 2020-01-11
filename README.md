@@ -89,6 +89,7 @@ The download and use of the dataset is for academic research only and it is free
 for non-commercial purposes. When downloading the dataset you agree to (unless with expressed permission of the authors): 
 not redistribute, modificate, or commercial usage of this dataset in any way or form, either partially or entirely. 
 If using this dataset, please cite the corresponding paper.
+
     ```
 	@ARTICLE{hampali2019honnotate,
     	      title={HOnnotate: A method for 3D Annotation of Hand and Objects Poses},
