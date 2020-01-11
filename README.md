@@ -1,6 +1,6 @@
 # HO3D - scripts
 
-![Teaser](logo.png =100x100)
+![Teaser](logo.png =400x)
 
 HO3D is a dataset with 3D pose annotations for hand and object under severe occlusions from each other. The sequences in the dataset contain different
 persons manipulating different objects, which are taken from [YCB dataset](https://rse-lab.cs.washington.edu/projects/posecnn/). Details about the 
