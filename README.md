@@ -32,6 +32,7 @@ This repository contains a collection of scripts for:
 3. Assuming ${MANO_PATH} contains the path to where you unpacked the downloaded archive, use the provided script to setup the MANO folder as required.
     ```
     python setup_mano.py ${MANO_PATH}
+    ```
     
 4. Download the YCB object models by clicking on `The YCB-Video 3D Models` in [https://rse-lab.cs.washington.edu/projects/posecnn/]. Assume ${YCB_PATH}
 is the path where you unpacked the object models into (path to where _models_ folder branches off)
