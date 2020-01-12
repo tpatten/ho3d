@@ -1,6 +1,6 @@
 # HO3D - scripts
 
-![Teaser](logo.png | width=100)
+<img src="logo.png" width="60%">
 
 HO3D is a dataset with 3D pose annotations for hand and object under severe occlusions from each other. The sequences in the dataset contain different
 persons manipulating different objects, which are taken from [YCB dataset](https://rse-lab.cs.washington.edu/projects/posecnn/). Details about the 
@@ -29,9 +29,10 @@ This repository contains a collection of scripts for:
     ```
     http://mano.is.tue.mpg.de
     ```
-3. Assuming ${MANO_PATH} contains the path to where you unpacked the downloaded archive use the provided script to setup the MANO folder as required.
+3. Assuming ${MANO_PATH} contains the path to where you unpacked the downloaded archive, use the provided script to setup the MANO folder as required.
     ```
     python setup_mano.py ${MANO_PATH}
+    ```
     
 4. Download the YCB object models by clicking on `The YCB-Video 3D Models` in [https://rse-lab.cs.washington.edu/projects/posecnn/]. Assume ${YCB_PATH}
 is the path where you unpacked the object models into (path to where _models_ folder branches off)
@@ -89,7 +90,8 @@ The download and use of the dataset is for academic research only and it is free
 for non-commercial purposes. When downloading the dataset you agree to (unless with expressed permission of the authors): 
 not redistribute, modificate, or commercial usage of this dataset in any way or form, either partially or entirely. 
 If using this dataset, please cite the corresponding paper.
-    ```
+
+    
 	@ARTICLE{hampali2019honnotate,
     	      title={HOnnotate: A method for 3D Annotation of Hand and Objects Poses},
               author={Shreyas Hampali and Mahdi Rad and Markus Oberweger and Vincent Lepetit},
@@ -98,7 +100,7 @@ If using this dataset, please cite the corresponding paper.
               archivePrefix={arXiv},
               primaryClass={cs.CV}
              }
-    ```
+    
 # Acknowledgments
 
 1. The evaluation scripts used in the HO3D challenge have been mostly re-purposed from [Freihand challenge](https://github.com/lmb-freiburg/freihand). We
