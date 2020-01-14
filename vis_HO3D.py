@@ -46,7 +46,7 @@ jointsMapManoToSimple = [0,
                          7, 8, 9, 20]
 
 if not os.path.exists(MANO_MODEL_PATH):
-    raise Exception('MANO model missing! Please copy the mano model to \'mano\' folder in root directory.')
+    raise Exception('MANO model missing! Please run setup_mano.py to setup mano folder')
 else:
     from mano.webuser.smpl_handpca_wrapper_HAND_only import load_model
 
