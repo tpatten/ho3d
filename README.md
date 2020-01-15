@@ -23,7 +23,7 @@ This repository contains a collection of scripts for:
     ```
     conda create -n python2.7 python=2.7
     source activate python2.7
-    pip install numpy matplotlib scikit-image transforms3d tqdm opencv-python cython pickle
+    pip install numpy matplotlib scikit-image transforms3d tqdm opencv-python cython open3d
     ```
 2. Download Models&code from the MANO website
     ```
