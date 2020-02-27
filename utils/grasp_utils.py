@@ -1,5 +1,5 @@
 from utils.vis_utils import *
-from os.path import join, exists
+from os.path import exists
 import numpy as np
 
 wrist_indices = [0]
@@ -57,7 +57,8 @@ def read_hand_annotations(filename):
     '''
 
     pkl_data = load_pickle_data(filename)
-    return pkl_data['handJoints3D'], pkl_data['objRot'], pkl_data['objTrans'], pkl_data['objName']
+    #return pkl_data['handJoints3D'], pkl_data['objRot'], pkl_data['objTrans'], pkl_data['objName'], pkl_data['camMat']
+    return pkl_data
 
 
 def read_grasp_annotations(filename):
@@ -92,6 +93,11 @@ def save_grasp_annotations(filename, transforms, scores):
         f.write('{} '.format(scores[i]))
         f.write('\n')
     f.close()
+
+
+def save_grasp_annotation_pkl(filename, transform):
+    with open(filename, 'wb') as f:
+        pickle.dump(transform, f)
 
 
 def save_grasp_results(filename, grasp_results):

@@ -15,11 +15,13 @@ export LD_LIBRARY_PATH="/usr/lib/nvidia-418:/usr/lib32/nvidia-418":${LD_LIBRARY_
 """
 
 from utils.grasp_utils import *
+from mano.webuser.smpl_handpca_wrapper_HAND_only import load_model
 import cv2
 import argparse
 import transforms3d as tf3d
 import open3d as o3d
 import copy
+from os.path import join
 
 
 MODEL_PATH = '/v4rtemp/datasets/HandTracking/HO3D_v2/models/'
@@ -35,6 +37,7 @@ class RobotGraspAnnotator:
         self.base_pcd = None
         self.pcd = None
         self.kd_tree = None
+        self.do_visualize = args.visualize
 
         # Extract the annotated points on the gripper to determine the transformation
         self.left_tip = self.gripper_pcd.points[LEFT_TIP_IN_CLOUD]
@@ -106,26 +109,75 @@ class RobotGraspAnnotator:
                 meta_filename = os.path.join(self.base_dir, self.data_split, d, 'meta', str(id) + '.pkl')
                 print('Processing file {}'.format(meta_filename))
                 # Load the annotation
-                joints3d_anno, obj_rot, obj_trans, obj_id = read_hand_annotations(meta_filename)
+                # joints3d_anno, obj_rot, obj_trans, obj_id, cam_mat = read_hand_annotations(meta_filename)
+                anno = read_hand_annotations(meta_filename)
+                joints3d_anno = anno['handJoints3D']
+                obj_rot = anno['objRot']
+                obj_trans = anno['objTrans']
+                obj_id = anno['objName']
+                cam_mat = anno['camMat']
                 # If new object id, must load new cloud
                 if obj_id != self.object_id:
                     self.object_id = obj_id
                     self.base_pcd = self.get_object_pcd(self.object_id)
+                    # obj_cloud_filename = join(self.args.models_path, self.object_id, 'points.xyz')
+                    # obj_cloud_filename = obj_cloud_filename.replace("points.xyz", "points.ply")
+                    # o3d.io.write_point_cloud(obj_cloud_filename, self.base_pcd)
                 # Rotate and translate the cloud
                 self.pcd = copy.deepcopy(self.base_pcd)
                 pts = np.asarray(self.pcd.points)
                 pts = np.matmul(pts, cv2.Rodrigues(obj_rot)[0].T)
                 pts += obj_trans
                 self.pcd.points = o3d.utility.Vector3dVector(pts)
-                self.pcd.paint_uniform_color([0.5, 0.5, 0.5])
+                self.pcd.paint_uniform_color([0.4, 0.4, 0.9])
                 self.kd_tree = o3d.geometry.KDTreeFlann(self.pcd)
 
                 # Get the gripper transform
-                tf_gripper = self.get_gripper_transform(joints3d_anno, obj_trans, obj_rot)
+                tf_gripper, grasp_points, mid_point, wrist_point = self.get_gripper_transform(joints3d_anno, obj_trans, obj_rot)
                 transforms.append(tf_gripper)
                 scores.append(1.0)
 
-                sys.exit(0)
+                # Create a cloud for visualization
+                rgb = read_RGB_img(self.base_dir, d, id, self.data_split)
+                rgb = o3d.geometry.Image(rgb.astype(np.uint8))
+                rgb = o3d.geometry.Image(rgb)
+                depth = read_depth_img(self.base_dir, d, id, self.data_split)
+                depth = o3d.geometry.Image(depth.astype(np.float32))
+
+                rgbd_image = o3d.geometry.create_rgbd_image_from_color_and_depth(rgb, depth)
+                cam_intrinsics = o3d.camera.PinholeCameraIntrinsic()
+                cam_intrinsics.set_intrinsics(640, 480, cam_mat[0, 0], cam_mat[1, 1], cam_mat[0, 2], cam_mat[1, 2])
+                scene_pcd = o3d.geometry.create_point_cloud_from_rgbd_image(rgbd_image, cam_intrinsics)
+                scene_pcd.points = o3d.utility.Vector3dVector(np.asarray(scene_pcd.points) * 1000)
+                # Flip it, otherwise the pointcloud will be upside down
+                scene_pcd.transform([[1, 0, 0, 0], [0, -1, 0, 0], [0, 0, -1, 0], [0, 0, 0, 1]])
+
+                # Create hand mesh
+                _, hand_mesh = forwardKinematics(anno['handPose'], anno['handTrans'], anno['handBeta'])
+
+                if self.do_visualize:
+                    self.visualize_hand_and_grasp(joints3d_anno, transforms[-1], grasp_points, mid_point, wrist_point, scene_pcd, hand_mesh)
+                    # self.visualize_grasp([transforms[-1]])
+                    # self.visualize_grasps_all(transforms)
+
+                save_filename = os.path.join(self.base_dir, self.data_split, d, 'meta', 'grasp_' + str(id) + '.pkl')
+                save_grasp_annotation_pkl(save_filename, tf_gripper)
+                save_filename = os.path.join(self.base_dir, self.data_split, d, 'meta', 'cloud_' + str(id) + '.ply')
+                o3d.io.write_point_cloud(save_filename, scene_pcd)
+
+                save_filename = os.path.join(self.base_dir, self.data_split, d, 'meta', 'hand_mesh_' + str(id) + '.ply')
+                mesh = o3d.geometry.TriangleMesh()
+                if hasattr(hand_mesh, 'r'):
+                    mesh.vertices = o3d.utility.Vector3dVector(np.copy(hand_mesh.r))
+                    numVert = hand_mesh.r.shape[0]
+                elif hasattr(hand_mesh, 'v'):
+                    mesh.vertices = o3d.utility.Vector3dVector(np.copy(hand_mesh.v))
+                    numVert = hand_mesh.v.shape[0]
+                else:
+                    raise Exception('Unknown Mesh format')
+                mesh.triangles = o3d.utility.Vector3iVector(np.copy(hand_mesh.f))
+                mesh.vertex_colors = o3d.utility.Vector3dVector(np.tile(np.array([[0.9, 0.4, 0.4]]), [numVert, 1]))
+                o3d.io.write_triangle_mesh(save_filename, mesh)
 
         # Write to file
         '''
@@ -140,9 +192,6 @@ class RobotGraspAnnotator:
         joints3d = joints3d_anno
         # joints3d = joints3d - obj_trans
         # joints3d = np.matmul(joints3d, np.linalg.inv(cv2.Rodrigues(obj_rot)[0].T))
-        self.visualize_hand(joints3d)
-
-        # Rotate the object cloud
 
         # Get the grasp points
         finger_positions, grasp_points = self.get_grasp_points(joints3d)
@@ -152,8 +201,11 @@ class RobotGraspAnnotator:
         mid_point, wrist_point = self.get_grasp_mid_and_wrist_points(finger_positions, grasp_points)
         tf = self.grasp_to_transformation_aligned(grasp_points, mid_point, wrist_point)
 
+        #if self.do_visualize:
+        #    self.visualize_hand(joints3d, grasp_points, mid_point, wrist_point)
+
         # Return the transformation
-        return tf
+        return tf, grasp_points, mid_point, wrist_point
 
     def get_point_grasp_probability(self, joints3d):
         # Get the fingertip positions and distances to the object
@@ -439,7 +491,23 @@ class RobotGraspAnnotator:
         # Return the grasps that include the symmetries
         return merged_transforms, merged_scores
 
-    def visualize(self, transforms):
+    def visualize_grasp(self, transform):
+        # Create visualizer
+        vis = o3d.visualization.Visualizer()
+        vis.create_window()
+
+        # Plot the coordinate frame
+        vis.add_geometry(o3d.create_mesh_coordinate_frame(size=0.05))
+
+        # Plot the object cloud
+        vis.add_geometry(self.pcd)
+
+        self.plot_gripper_cloud(vis, self.gripper_pcd, transform)
+
+        vis.run()
+        vis.destroy_window()
+
+    def visualize_grasps_all(self, transforms):
         # Create visualizer
         vis = o3d.visualization.Visualizer()
         vis.create_window()
@@ -456,7 +524,7 @@ class RobotGraspAnnotator:
         vis.run()
         vis.destroy_window()
 
-    def visualize_hand(self, joints3d):
+    def visualize_hand(self, joints3d, grasp_points, mid_point, wrist_point):
         # Create visualizer
         vis = o3d.visualization.Visualizer()
         vis.create_window()
@@ -498,6 +566,82 @@ class RobotGraspAnnotator:
         line_set.colors = o3d.utility.Vector3dVector(line_colors)
         vis.add_geometry(line_set)
 
+        # Plot the grasp points
+        self.plot_gripper_end_points(vis, grasp_points)
+
+        vis.run()
+        vis.destroy_window()
+
+    def visualize_hand_and_grasp(self, joints3d, transform, grasp_points, mid_point, wrist_point, scene_pcd=None, hand_mesh = None):
+        # Create visualizer
+        vis = o3d.visualization.Visualizer()
+        vis.create_window()
+
+        # Plot the coordinate frame
+        vis.add_geometry(o3d.create_mesh_coordinate_frame(size=0.05))
+
+        # Plot the object cloud
+        vis.add_geometry(self.pcd)
+
+        # Plot the finger joints
+        for i in range(len(all_indices)):
+            for j in range(len(all_indices[i])):
+                mm = o3d.create_mesh_sphere(radius=joint_sizes[j])
+                mm.compute_vertex_normals()
+                mm.paint_uniform_color(finger_colors[i])
+                trans3d = joints3d[all_indices[i][j]]
+                tt = np.eye(4)
+                tt[0:3, 3] = trans3d
+                mm.transform(tt)
+                vis.add_geometry(mm)
+
+        # Plot lines between joints
+        lines = [[0, 13], [0, 1], [0, 4], [0, 10], [0, 7],
+                 [13, 14], [14, 15], [15, 16],
+                 [1, 2], [2, 3], [3, 17],
+                 [4, 5], [5, 6], [6, 18],
+                 [10, 11], [11, 12], [12, 19],
+                 [7, 8], [8, 9], [9, 20]]
+        line_colors = [finger_colors[1], finger_colors[2], finger_colors[3], finger_colors[4], finger_colors[5],
+                       finger_colors[1], finger_colors[1], finger_colors[1],
+                       finger_colors[2], finger_colors[2], finger_colors[2],
+                       finger_colors[3], finger_colors[3], finger_colors[3],
+                       finger_colors[4], finger_colors[4], finger_colors[4],
+                       finger_colors[5], finger_colors[5], finger_colors[5]]
+        line_set = o3d.geometry.LineSet()
+        line_set.points = o3d.utility.Vector3dVector(joints3d)
+        line_set.lines = o3d.utility.Vector2iVector(lines)
+        line_set.colors = o3d.utility.Vector3dVector(line_colors)
+        vis.add_geometry(line_set)
+
+        # Plot the gripper cloud
+        self.plot_gripper_cloud(vis, self.gripper_pcd, transform)
+
+        # Plot the grasp points
+        self.plot_gripper_end_points(vis, grasp_points)
+
+        # Plot scene
+        if scene_pcd is not None:
+            vis.add_geometry(scene_pcd)
+
+        # Visualize hand
+        '''
+        if hand_mesh is not None:
+            mesh = o3d.geometry.TriangleMesh()
+            if hasattr(hand_mesh, 'r'):
+                mesh.vertices = o3d.utility.Vector3dVector(np.copy(hand_mesh.r) * 0.001)
+                numVert = hand_mesh.r.shape[0]
+            elif hasattr(hand_mesh, 'v'):
+                mesh.vertices = o3d.utility.Vector3dVector(np.copy(hand_mesh.v) * 0.001)
+                numVert = hand_mesh.v.shape[0]
+            else:
+                raise Exception('Unknown Mesh format')
+            mesh.triangles = o3d.utility.Vector3iVector(np.copy(hand_mesh.f))
+            mesh.vertex_colors = o3d.utility.Vector3dVector(
+                np.tile(np.array([[0.9, 0.4, 0.4]]), [numVert, 1]))
+            o3d.visualization.draw_geometries([mesh])
+        '''
+
         vis.run()
         vis.destroy_window()
 
@@ -510,8 +654,49 @@ class RobotGraspAnnotator:
         gripper_xyz[2, :] += transform[2, 3]
         gripper_pcd = o3d.geometry.PointCloud()
         gripper_pcd.points = o3d.utility.Vector3dVector(gripper_xyz.T)
-        # gripper_pcd.paint_uniform_color([0., 1.0, 0.])
+        gripper_pcd.paint_uniform_color([0.4, 0.9, 0.4])
         vis.add_geometry(gripper_pcd)
+
+    @staticmethod
+    def plot_gripper_end_points(vis, end_points, box_dim=0.01):
+        mm = o3d.create_mesh_box(width=box_dim, height=box_dim, depth=box_dim)
+        mm.compute_vertex_normals()
+        mm.paint_uniform_color([0.7, 0.0, 0.7])
+        tt = np.eye(4)
+        tt[0:3, 3] = end_points[0].flatten()
+        mm.transform(tt)
+        vis.add_geometry(mm)
+
+        mm = o3d.create_mesh_box(width=box_dim, height=box_dim, depth=box_dim)
+        mm.compute_vertex_normals()
+        mm.paint_uniform_color([0.0, 0.7, 0.7])
+        tt = np.eye(4)
+        tt[0:3, 3] = end_points[1].flatten()
+        mm.transform(tt)
+        vis.add_geometry(mm)
+
+
+def forwardKinematics(fullpose, trans, beta):
+    '''
+    MANO parameters --> 3D pts, mesh
+    :param fullpose:
+    :param trans:
+    :param beta:
+    :return: 3D pts of size (21,3)
+    '''
+
+    MANO_MODEL_PATH = './mano/models/MANO_RIGHT.pkl'
+
+    assert fullpose.shape == (48,)
+    assert trans.shape == (3,)
+    assert beta.shape == (10,)
+
+    m = load_model(MANO_MODEL_PATH, ncomps=6, flat_hand_mean=True)
+    m.fullpose[:] = fullpose
+    m.trans[:] = trans
+    m.betas[:] = beta
+
+    return m.J_transformed.r, m
 
 
 if __name__ == '__main__':
@@ -528,9 +713,9 @@ if __name__ == '__main__':
     # args.frame_root_path = '../Task3/training_images_small'  # Changed
     # args.depth_frame_root_path = '../Task3/training_images_depth'
     args.models_path = '/home/tpatten/v4rtemp/datasets/HandTracking/HO3D_v2/models'
-    # args.save_path = '../Task3/object_models'
     args.gripper_cloud_path = 'hand_open_new.pcd'
     # args.use_gt_wrist = False
     args.force_hand_shape = False
+    args.visualize = False
 
     annotator = RobotGraspAnnotator(args)
