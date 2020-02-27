@@ -308,7 +308,6 @@ def read_obj(filename):
         elif key == 'vt':
             d['vt'].append([np.array([float(v) for v in values])])
 
-
     for k, v in d.items():
         if k in ['v','vn','f','vt','ft', 'fn']:
             if v:

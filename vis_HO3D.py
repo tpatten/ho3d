@@ -17,19 +17,19 @@ def install(package):
 try:
     import matplotlib.pyplot as plt
 except:
-    install('matplotlib')
+#    install('matplotlib')
     import matplotlib.pyplot as plt
 
 try:
     import chumpy as ch
 except:
-    install('chumpy')
+#    install('chumpy')
     import chumpy as ch
 
 try:
     import pickle
 except:
-    install('pickle')
+    #install('pickle')
     import pickle
 
 import cv2
@@ -121,6 +121,9 @@ if __name__ == '__main__':
         # get the hand Mesh from MANO model for the current pose
         if split == 'train':
             handJoints3D, handMesh = forwardKinematics(anno['handPose'], anno['handTrans'], anno['handBeta'])
+            
+        #print(anno['handJoints3D'])
+        #print(handJoints3D)
 
         # project to 2D
         if split == 'train':
