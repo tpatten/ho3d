@@ -21,7 +21,7 @@ import argparse
 import transforms3d as tf3d
 import open3d as o3d
 import copy
-from os.path import join
+from os.path import join, exists
 
 
 MODEL_PATH = '/v4rtemp/datasets/HandTracking/HO3D_v2/models/'
@@ -108,76 +108,84 @@ class RobotGraspAnnotator:
                 # Create the filename for the metadata file
                 meta_filename = os.path.join(self.base_dir, self.data_split, d, 'meta', str(id) + '.pkl')
                 print('Processing file {}'.format(meta_filename))
-                # Load the annotation
-                # joints3d_anno, obj_rot, obj_trans, obj_id, cam_mat = read_hand_annotations(meta_filename)
-                anno = read_hand_annotations(meta_filename)
-                joints3d_anno = anno['handJoints3D']
-                obj_rot = anno['objRot']
-                obj_trans = anno['objTrans']
-                obj_id = anno['objName']
-                cam_mat = anno['camMat']
-                # If new object id, must load new cloud
-                if obj_id != self.object_id:
-                    self.object_id = obj_id
-                    self.base_pcd = self.get_object_pcd(self.object_id)
-                    # obj_cloud_filename = join(self.args.models_path, self.object_id, 'points.xyz')
-                    # obj_cloud_filename = obj_cloud_filename.replace("points.xyz", "points.ply")
-                    # o3d.io.write_point_cloud(obj_cloud_filename, self.base_pcd)
-                # Rotate and translate the cloud
-                self.pcd = copy.deepcopy(self.base_pcd)
-                pts = np.asarray(self.pcd.points)
-                pts = np.matmul(pts, cv2.Rodrigues(obj_rot)[0].T)
-                pts += obj_trans
-                self.pcd.points = o3d.utility.Vector3dVector(pts)
-                self.pcd.paint_uniform_color([0.4, 0.4, 0.9])
-                self.kd_tree = o3d.geometry.KDTreeFlann(self.pcd)
-
-                # Get the gripper transform
-                tf_gripper, grasp_points, mid_point, wrist_point = self.get_gripper_transform(joints3d_anno, obj_trans, obj_rot)
-                transforms.append(tf_gripper)
-                scores.append(1.0)
-
-                # Create a cloud for visualization
-                rgb = read_RGB_img(self.base_dir, d, id, self.data_split)
-                rgb = o3d.geometry.Image(rgb.astype(np.uint8))
-                rgb = o3d.geometry.Image(rgb)
-                depth = read_depth_img(self.base_dir, d, id, self.data_split)
-                depth = o3d.geometry.Image(depth.astype(np.float32))
-
-                rgbd_image = o3d.geometry.create_rgbd_image_from_color_and_depth(rgb, depth)
-                cam_intrinsics = o3d.camera.PinholeCameraIntrinsic()
-                cam_intrinsics.set_intrinsics(640, 480, cam_mat[0, 0], cam_mat[1, 1], cam_mat[0, 2], cam_mat[1, 2])
-                scene_pcd = o3d.geometry.create_point_cloud_from_rgbd_image(rgbd_image, cam_intrinsics)
-                scene_pcd.points = o3d.utility.Vector3dVector(np.asarray(scene_pcd.points) * 1000)
-                # Flip it, otherwise the pointcloud will be upside down
-                scene_pcd.transform([[1, 0, 0, 0], [0, -1, 0, 0], [0, 0, -1, 0], [0, 0, 0, 1]])
-
-                # Create hand mesh
-                _, hand_mesh = forwardKinematics(anno['handPose'], anno['handTrans'], anno['handBeta'])
-
-                if self.do_visualize:
-                    self.visualize_hand_and_grasp(joints3d_anno, transforms[-1], grasp_points, mid_point, wrist_point, scene_pcd, hand_mesh)
-                    # self.visualize_grasp([transforms[-1]])
-                    # self.visualize_grasps_all(transforms)
 
                 save_filename = os.path.join(self.base_dir, self.data_split, d, 'meta', 'grasp_' + str(id) + '.pkl')
-                save_grasp_annotation_pkl(save_filename, tf_gripper)
-                save_filename = os.path.join(self.base_dir, self.data_split, d, 'meta', 'cloud_' + str(id) + '.ply')
-                o3d.io.write_point_cloud(save_filename, scene_pcd)
-
-                save_filename = os.path.join(self.base_dir, self.data_split, d, 'meta', 'hand_mesh_' + str(id) + '.ply')
-                mesh = o3d.geometry.TriangleMesh()
-                if hasattr(hand_mesh, 'r'):
-                    mesh.vertices = o3d.utility.Vector3dVector(np.copy(hand_mesh.r))
-                    numVert = hand_mesh.r.shape[0]
-                elif hasattr(hand_mesh, 'v'):
-                    mesh.vertices = o3d.utility.Vector3dVector(np.copy(hand_mesh.v))
-                    numVert = hand_mesh.v.shape[0]
+                if exists(save_filename):
+                    print('Already exists, skipping')
                 else:
-                    raise Exception('Unknown Mesh format')
-                mesh.triangles = o3d.utility.Vector3iVector(np.copy(hand_mesh.f))
-                mesh.vertex_colors = o3d.utility.Vector3dVector(np.tile(np.array([[0.9, 0.4, 0.4]]), [numVert, 1]))
-                o3d.io.write_triangle_mesh(save_filename, mesh)
+                    # Load the annotation
+                    # joints3d_anno, obj_rot, obj_trans, obj_id, cam_mat = read_hand_annotations(meta_filename)
+                    anno = read_hand_annotations(meta_filename)
+                    joints3d_anno = anno['handJoints3D']
+                    obj_rot = anno['objRot']
+                    obj_trans = anno['objTrans']
+                    obj_id = anno['objName']
+                    cam_mat = anno['camMat']
+                    # If new object id, must load new cloud
+                    if obj_id != self.object_id:
+                        self.object_id = obj_id
+                        self.base_pcd = self.get_object_pcd(self.object_id)
+                        # obj_cloud_filename = join(self.args.models_path, self.object_id, 'points.xyz')
+                        # obj_cloud_filename = obj_cloud_filename.replace("points.xyz", "points.ply")
+                        # o3d.io.write_point_cloud(obj_cloud_filename, self.base_pcd)
+                    # Rotate and translate the cloud
+                    self.pcd = copy.deepcopy(self.base_pcd)
+                    pts = np.asarray(self.pcd.points)
+                    pts = np.matmul(pts, cv2.Rodrigues(obj_rot)[0].T)
+                    pts += obj_trans
+                    self.pcd.points = o3d.utility.Vector3dVector(pts)
+                    self.pcd.paint_uniform_color([0.4, 0.4, 0.9])
+                    self.kd_tree = o3d.geometry.KDTreeFlann(self.pcd)
+
+                    # Get the gripper transform
+                    tf_gripper, grasp_points, mid_point, wrist_point = self.get_gripper_transform(joints3d_anno, obj_trans, obj_rot)
+                    transforms.append(tf_gripper)
+                    if grasp_points is not None:
+                        scores.append(1.0)
+                    else:
+                        scores.append(0.0)
+
+                    # Create a cloud for visualization
+                    rgb = read_RGB_img(self.base_dir, d, id, self.data_split)
+                    rgb = o3d.geometry.Image(rgb.astype(np.uint8))
+                    rgb = o3d.geometry.Image(rgb)
+                    depth = read_depth_img(self.base_dir, d, id, self.data_split)
+                    depth = o3d.geometry.Image(depth.astype(np.float32))
+
+                    rgbd_image = o3d.geometry.create_rgbd_image_from_color_and_depth(rgb, depth)
+                    cam_intrinsics = o3d.camera.PinholeCameraIntrinsic()
+                    cam_intrinsics.set_intrinsics(640, 480, cam_mat[0, 0], cam_mat[1, 1], cam_mat[0, 2], cam_mat[1, 2])
+                    scene_pcd = o3d.geometry.create_point_cloud_from_rgbd_image(rgbd_image, cam_intrinsics)
+                    scene_pcd.points = o3d.utility.Vector3dVector(np.asarray(scene_pcd.points) * 1000)
+                    # Flip it, otherwise the pointcloud will be upside down
+                    scene_pcd.transform([[1, 0, 0, 0], [0, -1, 0, 0], [0, 0, -1, 0], [0, 0, 0, 1]])
+
+                    # Create hand mesh
+                    _, hand_mesh = forwardKinematics(anno['handPose'], anno['handTrans'], anno['handBeta'])
+
+                    if self.do_visualize:
+                        self.visualize_hand_and_grasp(joints3d_anno, transforms[-1], grasp_points, mid_point, wrist_point, scene_pcd, hand_mesh)
+                        # self.visualize_grasp([transforms[-1]])
+                        # self.visualize_grasps_all(transforms)
+
+                    save_filename = os.path.join(self.base_dir, self.data_split, d, 'meta', 'grasp_' + str(id) + '.pkl')
+                    save_grasp_annotation_pkl(save_filename, tf_gripper)
+                    save_filename = os.path.join(self.base_dir, self.data_split, d, 'meta', 'cloud_' + str(id) + '.ply')
+                    o3d.io.write_point_cloud(save_filename, scene_pcd)
+
+                    save_filename = os.path.join(self.base_dir, self.data_split, d, 'meta', 'hand_mesh_' + str(id) + '.ply')
+                    mesh = o3d.geometry.TriangleMesh()
+                    if hasattr(hand_mesh, 'r'):
+                        mesh.vertices = o3d.utility.Vector3dVector(np.copy(hand_mesh.r))
+                        numVert = hand_mesh.r.shape[0]
+                    elif hasattr(hand_mesh, 'v'):
+                        mesh.vertices = o3d.utility.Vector3dVector(np.copy(hand_mesh.v))
+                        numVert = hand_mesh.v.shape[0]
+                    else:
+                        raise Exception('Unknown Mesh format')
+                    mesh.triangles = o3d.utility.Vector3iVector(np.copy(hand_mesh.f))
+                    mesh.vertex_colors = o3d.utility.Vector3dVector(np.tile(np.array([[0.9, 0.4, 0.4]]), [numVert, 1]))
+                    o3d.io.write_triangle_mesh(save_filename, mesh)
 
         # Write to file
         '''
@@ -195,6 +203,8 @@ class RobotGraspAnnotator:
 
         # Get the grasp points
         finger_positions, grasp_points = self.get_grasp_points(joints3d)
+        if np.any(np.isnan(grasp_points)) or np.all(grasp_points[0] - grasp_points[1]) == 0:
+            return np.zeros((4, 4)), None, None, None
 
         # Transform the grasp points to a transformation for the gripper
         # tf = self.grasp_to_transformation(finger_positions, grasp_points)

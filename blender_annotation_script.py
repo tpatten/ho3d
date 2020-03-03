@@ -4,6 +4,7 @@ import numpy as np
 import pickle
 import transforms3d as tf3d
 import cv2
+import copy
 
 c_id = np.array([0])
 target_dir = "/home/tpatten/v4rtemp/datasets/HandTracking/HO3D_v2/train/ABF10/meta/"
@@ -98,8 +99,8 @@ class loadNext(bpy.types.Operator):
                 print("Did not find grasp pose to load")
         else:
             # Add tiny bit of noise
-            angle_range = [-0.05, 0.05]
-            trans_range = [-0.01, 0.01]
+            angle_range = [-0.025, 0.025]
+            trans_range = [-0.005, 0.005]
             obj_object = bpy.data.objects[obj_name]
             obj_object.rotation_euler.x += np.random.uniform(angle_range[0], angle_range[1])
             obj_object.rotation_euler.y += np.random.uniform(angle_range[0], angle_range[1])
@@ -264,6 +265,14 @@ if __name__ == "__main__":
     grasp_pose = None
     for file in sorted(os.listdir(target_dir)):
         if file.startswith("cloud"):
-            file_list.append(file)
+            # file_list.append(file)
+            grasp_file_name = copy.deepcopy(file)
+            grasp_file_name = grasp_file_name.replace("cloud", "grasp_bl")
+            grasp_file_name = grasp_file_name.replace("ply", "pkl")
+            grasp_file_name = os.path.join(target_dir, grasp_file_name)
+            if not os.path.exists(grasp_file_name):
+                file_list.append(file)
+            else:
+                print("Already processed file {}, skipping".format(file))
 
     register()
