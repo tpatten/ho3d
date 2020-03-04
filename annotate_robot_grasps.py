@@ -717,14 +717,8 @@ if __name__ == '__main__':
     # parser.add_argument('--visualize', action='store_true')
     args = parser.parse_args()
     args.ho3d_path = '/home/tpatten/v4rtemp/datasets/HandTracking/HO3D_v2/'
-    # args.joint_anno_path = '../Task3/training_joint_annotation.txt'
-    # args.object_anno_path = '../Task3/training_object_annotation_small.txt'  # Changed
-    # args.mano_anno_path = '../Task3/training_mano_annotation.txt'
-    # args.frame_root_path = '../Task3/training_images_small'  # Changed
-    # args.depth_frame_root_path = '../Task3/training_images_depth'
     args.models_path = '/home/tpatten/v4rtemp/datasets/HandTracking/HO3D_v2/models'
     args.gripper_cloud_path = 'hand_open_new.pcd'
-    # args.use_gt_wrist = False
     args.force_hand_shape = False
     args.visualize = False
 

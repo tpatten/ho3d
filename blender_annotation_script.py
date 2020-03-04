@@ -6,8 +6,9 @@ import transforms3d as tf3d
 import cv2
 import copy
 
+inspect_mode = True
 c_id = np.array([0])
-target_dir = "/home/tpatten/v4rtemp/datasets/HandTracking/HO3D_v2/train/ABF10/meta/"
+target_dir = "/home/tpatten/v4rtemp/datasets/HandTracking/HO3D_v2/train/ABF11/meta/"
 gripper_model_dir = "/home/tpatten/v4rtemp/datasets/HandTracking/HO3D_v2/"
 gripper_model_fn = "hand_open_aligned.ply"
 textured_model_dir = "/home/tpatten/v4rtemp/datasets/HandTracking/HO3D_v2/models/"
@@ -40,9 +41,10 @@ class loadNext(bpy.types.Operator):
             gt_fn = os.path.join(target_dir, file_name)
             # print(grasp_pose)
 
-            with open(gt_fn, 'wb') as f:
-                pickle.dump(grasp_pose, f)
-            print("saved file to ", gt_fn)
+            if not inspect_mode:
+                with open(gt_fn, 'wb') as f:
+                    pickle.dump(grasp_pose, f)
+                print("saved file to ", gt_fn)
 
         # Now load new data
         for obj in bpy.context.scene.objects:
@@ -75,9 +77,12 @@ class loadNext(bpy.types.Operator):
                         s.transform_manipulators = {'TRANSLATE', 'ROTATE'}
 
         # Load and transform the gripper
-        if ind == 0:
+        if ind == 0 or inspect_mode:
             grasp_file_name = file_list[ind]
-            grasp_file_name = grasp_file_name.replace("cloud", "grasp")
+            if inspect_mode:
+                grasp_file_name = grasp_file_name.replace("cloud", "grasp_bl")
+            else:
+                grasp_file_name = grasp_file_name.replace("cloud", "grasp")
             grasp_file_name = grasp_file_name.replace("ply", "pkl")
             grasp_file_name = os.path.join(target_dir, grasp_file_name)
             in_pose = None
@@ -178,32 +183,6 @@ class resetObj(bpy.types.Operator):
         obj_object.location.z = 0
         return {'FINISHED'}
 
-'''
-class SaveFile(bpy.types.Operator):
-    bl_idname = "object.savefile"
-    bl_label = "Save File"
-
-    def execute(self, context):
-        scene = bpy.context.scene
-        obj = bpy.data.objects[obj_name]
-        pose = np.zeros((4, 4))
-        pose[:, :] = obj.matrix_world
-        pose = pose.reshape(-1)
-        grasp_pose = pose
-
-        file_name = file_list[c_id[0] - 1]
-        file_name = file_name.replace("cloud", "grasp_bl")
-        file_name = file_name.replace("ply", "pkl")
-        gt_fn = os.path.join(target_dir, file_name)
-        print(grasp_pose)
-
-        with open(gt_fn, 'wb') as f:
-            pickle.dump(grasp_pose, f)
-        print("saved file to ", gt_fn)
-
-        return {'FINISHED'}
-'''
-
 
 class AnnotationPanel(bpy.types.Panel):
     bl_label = "Pose Annotation"
@@ -214,13 +193,10 @@ class AnnotationPanel(bpy.types.Panel):
 
     def draw(self, context):
         layout = self.layout
+
         row = layout.row()
         row.alignment = 'CENTER'
         row.operator("object.reset")
-
-        #row = layout.row()
-        #row.alignment = 'CENTER'
-        #row.operator("object.savefile")
 
         row = layout.row()
         row.alignment = 'CENTER'
@@ -230,14 +206,12 @@ class AnnotationPanel(bpy.types.Panel):
 def register():
     bpy.utils.register_class(loadNext)
     bpy.utils.register_class(resetObj)
-    #bpy.utils.register_class(SaveFile)
     bpy.utils.register_class(AnnotationPanel)
 
 
 def unregister():
     bpy.utils.unregister_class(loadNext)
     bpy.utils.unregister_class(resetObj)
-    #bpy.utils.unregister_class(SaveFile)
     bpy.utils.unregister_class(AnnotationPanel)
 
 
@@ -265,14 +239,16 @@ if __name__ == "__main__":
     grasp_pose = None
     for file in sorted(os.listdir(target_dir)):
         if file.startswith("cloud"):
-            # file_list.append(file)
-            grasp_file_name = copy.deepcopy(file)
-            grasp_file_name = grasp_file_name.replace("cloud", "grasp_bl")
-            grasp_file_name = grasp_file_name.replace("ply", "pkl")
-            grasp_file_name = os.path.join(target_dir, grasp_file_name)
-            if not os.path.exists(grasp_file_name):
+            if inspect_mode:
                 file_list.append(file)
             else:
-                print("Already processed file {}, skipping".format(file))
+                grasp_file_name = copy.deepcopy(file)
+                grasp_file_name = grasp_file_name.replace("cloud", "grasp_bl")
+                grasp_file_name = grasp_file_name.replace("ply", "pkl")
+                grasp_file_name = os.path.join(target_dir, grasp_file_name)
+                if not os.path.exists(grasp_file_name):
+                    file_list.append(file)
+                else:
+                    print("Already processed file {}, skipping".format(file))
 
     register()
