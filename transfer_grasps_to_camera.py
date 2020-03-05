@@ -167,7 +167,7 @@ def transform_grasps_to_target(args, transform):
 
 if __name__ == '__main__':
     # parse the arguments
-    parser = argparse.ArgumentParser(description='HANDS19 - Task#3 HO-3D Scene alignment')
+    parser = argparse.ArgumentParser(description='HANDS19 - Task#3 HO-3D Transfer grasps')
     args = parser.parse_args()
     args.ho3d_path = '/home/tpatten/v4rtemp/datasets/HandTracking/HO3D_v2/'
     args.models_path = '/home/tpatten/v4rtemp/datasets/HandTracking/HO3D_v2/models'
