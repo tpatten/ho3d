@@ -38,6 +38,7 @@ class RobotGraspAnnotator:
         self.pcd = None
         self.kd_tree = None
         self.do_visualize = args.visualize
+        self.do_save = args.save
 
         # Extract the annotated points on the gripper to determine the transformation
         self.left_tip = self.gripper_pcd.points[LEFT_TIP_IN_CLOUD]
@@ -110,7 +111,7 @@ class RobotGraspAnnotator:
                 print('Processing file {}'.format(meta_filename))
 
                 save_filename = os.path.join(self.base_dir, self.data_split, d, 'meta', 'grasp_' + str(id) + '.pkl')
-                if exists(save_filename):
+                if self.do_save and exists(save_filename):
                     print('Already exists, skipping')
                 else:
                     # Load the annotation
@@ -168,24 +169,25 @@ class RobotGraspAnnotator:
                         # self.visualize_grasp([transforms[-1]])
                         # self.visualize_grasps_all(transforms)
 
-                    save_filename = os.path.join(self.base_dir, self.data_split, d, 'meta', 'grasp_' + str(id) + '.pkl')
-                    save_grasp_annotation_pkl(save_filename, tf_gripper)
-                    save_filename = os.path.join(self.base_dir, self.data_split, d, 'meta', 'cloud_' + str(id) + '.ply')
-                    o3d.io.write_point_cloud(save_filename, scene_pcd)
+                    if self.do_save:
+                        save_filename = os.path.join(self.base_dir, self.data_split, d, 'meta', 'grasp_' + str(id) + '.pkl')
+                        save_grasp_annotation_pkl(save_filename, tf_gripper)
+                        save_filename = os.path.join(self.base_dir, self.data_split, d, 'meta', 'cloud_' + str(id) + '.ply')
+                        o3d.io.write_point_cloud(save_filename, scene_pcd)
 
-                    save_filename = os.path.join(self.base_dir, self.data_split, d, 'meta', 'hand_mesh_' + str(id) + '.ply')
-                    mesh = o3d.geometry.TriangleMesh()
-                    if hasattr(hand_mesh, 'r'):
-                        mesh.vertices = o3d.utility.Vector3dVector(np.copy(hand_mesh.r))
-                        numVert = hand_mesh.r.shape[0]
-                    elif hasattr(hand_mesh, 'v'):
-                        mesh.vertices = o3d.utility.Vector3dVector(np.copy(hand_mesh.v))
-                        numVert = hand_mesh.v.shape[0]
-                    else:
-                        raise Exception('Unknown Mesh format')
-                    mesh.triangles = o3d.utility.Vector3iVector(np.copy(hand_mesh.f))
-                    mesh.vertex_colors = o3d.utility.Vector3dVector(np.tile(np.array([[0.9, 0.4, 0.4]]), [numVert, 1]))
-                    o3d.io.write_triangle_mesh(save_filename, mesh)
+                        save_filename = os.path.join(self.base_dir, self.data_split, d, 'meta', 'hand_mesh_' + str(id) + '.ply')
+                        mesh = o3d.geometry.TriangleMesh()
+                        if hasattr(hand_mesh, 'r'):
+                            mesh.vertices = o3d.utility.Vector3dVector(np.copy(hand_mesh.r))
+                            numVert = hand_mesh.r.shape[0]
+                        elif hasattr(hand_mesh, 'v'):
+                            mesh.vertices = o3d.utility.Vector3dVector(np.copy(hand_mesh.v))
+                            numVert = hand_mesh.v.shape[0]
+                        else:
+                            raise Exception('Unknown Mesh format')
+                        mesh.triangles = o3d.utility.Vector3iVector(np.copy(hand_mesh.f))
+                        mesh.vertex_colors = o3d.utility.Vector3dVector(np.tile(np.array([[0.9, 0.4, 0.4]]), [numVert, 1]))
+                        o3d.io.write_triangle_mesh(save_filename, mesh)
 
         # Write to file
         '''
@@ -207,9 +209,9 @@ class RobotGraspAnnotator:
             return np.zeros((4, 4)), None, None, None
 
         # Transform the grasp points to a transformation for the gripper
-        # tf = self.grasp_to_transformation(finger_positions, grasp_points)
+        tf = self.grasp_to_transformation(finger_positions, grasp_points)
         mid_point, wrist_point = self.get_grasp_mid_and_wrist_points(finger_positions, grasp_points)
-        tf = self.grasp_to_transformation_aligned(grasp_points, mid_point, wrist_point)
+        # tf = self.grasp_to_transformation_aligned(grasp_points, mid_point, wrist_point)
 
         #if self.do_visualize:
         #    self.visualize_hand(joints3d, grasp_points, mid_point, wrist_point)
@@ -310,13 +312,14 @@ class RobotGraspAnnotator:
 
         # The mean position of the other fingers becomes the second grasp point
         non_thumb_endpoint = np.zeros((3, 1))
-        weight_count = 0.
-        for i in range(1, len(tip_indices)):
-            non_thumb_endpoint[0] += (finger_positions[tip_indices[i]][0] * finger_weights[i])
-            non_thumb_endpoint[1] += (finger_positions[tip_indices[i]][1] * finger_weights[i])
-            non_thumb_endpoint[2] += (finger_positions[tip_indices[i]][2] * finger_weights[i])
-            weight_count += finger_weights[i]
-        non_thumb_endpoint /= weight_count
+        #weight_count = 0.
+        #for i in range(1, len(tip_indices)):
+        #    non_thumb_endpoint[0] += (finger_positions[tip_indices[i]][0] * finger_weights[i])
+        #    non_thumb_endpoint[1] += (finger_positions[tip_indices[i]][1] * finger_weights[i])
+        #    non_thumb_endpoint[2] += (finger_positions[tip_indices[i]][2] * finger_weights[i])
+        #    weight_count += finger_weights[i]
+        #non_thumb_endpoint /= weight_count
+        non_thumb_endpoint = np.asarray(finger_positions[tip_indices[1]]).reshape((1, 3))
 
         return self.adjust_grasp_point_distance(thumb_endpoint[0], non_thumb_endpoint.flatten())
 
@@ -366,10 +369,20 @@ class RobotGraspAnnotator:
         approach_start_point -= (self.gripper_length * approach_direction)
 
         # Compute the rotation matrix
-        quat1 = tf3d.euler.euler2quat(0., np.pi / 2 - np.arcsin(approach_direction[2]),
-                                      np.pi / 2 + np.arctan2(closing_direction[1], closing_direction[0]))
-        quat2 = tf3d.euler.euler2quat(0., np.arcsin(closing_direction[2]), 0.)
-        rot = tf3d.quaternions.quat2mat(tf3d.quaternions.qmult(quat1, quat2))
+        #quat1 = tf3d.euler.euler2quat(0., np.pi / 2 - np.arcsin(approach_direction[2]),
+        #                              np.pi / 2 + np.arctan2(closing_direction[1], closing_direction[0]))
+        #quat2 = tf3d.euler.euler2quat(0., np.arcsin(closing_direction[2]), 0.)
+        #rot = tf3d.quaternions.quat2mat(tf3d.quaternions.qmult(quat1, quat2))
+
+        # z = approach
+        # y = close
+        # x = close X approach
+        out_of_plane = np.cross(closing_direction, approach_direction)
+
+        rot = np.eye(3)
+        rot[:, 0] = out_of_plane
+        rot[:, 1] = closing_direction
+        rot[:, 2] = approach_direction
 
         # Convert to 4x4 matrix
         tf = np.eye(4)
@@ -712,14 +725,12 @@ def forwardKinematics(fullpose, trans, beta):
 if __name__ == '__main__':
     # parse the arguments
     parser = argparse.ArgumentParser(description='HANDS19 - Task#3 HO-3D Robot grasp extraction')
-    # parser.add_argument('--object-model', type=str, default='003_cracker_box', required=False,
-    #                     help='Name of the object model')
-    # parser.add_argument('--visualize', action='store_true')
     args = parser.parse_args()
     args.ho3d_path = '/home/tpatten/v4rtemp/datasets/HandTracking/HO3D_v2/'
     args.models_path = '/home/tpatten/v4rtemp/datasets/HandTracking/HO3D_v2/models'
     args.gripper_cloud_path = 'hand_open_new.pcd'
-    args.force_hand_shape = False
-    args.visualize = False
+    args.force_hand_shape = True
+    args.visualize = True
+    args.save = False
 
     annotator = RobotGraspAnnotator(args)

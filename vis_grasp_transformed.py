@@ -91,6 +91,12 @@ if __name__ == '__main__':
 
     # Get gripper and transform
     gripper_pcd = o3d.io.read_point_cloud(args.gripper_cloud_path)
+    #pts = np.asarray(gripper_pcd.points)
+    #f = open("hand_open.xyz", "w")
+    #for p in pts:
+    #    f.write('{} {} {}\n'.format(p[0], p[1], p[2]))
+    #f.close()
+    #sys.exit(0)
     gripper_pcd_processed = copy.deepcopy(gripper_pcd)
     gripper_pcd_processed_from_scaled = copy.deepcopy(gripper_pcd)
     gripper_transform_file = args.file
