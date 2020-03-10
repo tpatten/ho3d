@@ -10,8 +10,8 @@ if __name__ == '__main__':
     # parser.add_argument('--visualize', action='store_true')
     args = parser.parse_args()
     args.ho3d_path = '/home/tpatten/v4rtemp/datasets/HandTracking/HO3D_v2/'
-    args.subject_name = 'ABF'
-    #args.subject_name = ''
+    args.subject_name = ['ABF', 'BB', 'GPMF', 'GSF', 'MDF', 'ShSu']
+    # args.subject_name = []
     args.test_proportion = 0.2
 
     # Read the lines in the train.txt file
@@ -52,41 +52,103 @@ if __name__ == '__main__':
             file_dict[subject_name].append((camera_id, frame_id))
 
     # Create the split
-    files_for_selection = []
-    if not args.subject_name:
+    if len(args.subject_name) == 0:
+        files_for_selection = []
         for i in range(len(file_list)):
             if grasp_success[i]:
                 files_for_selection.append(file_list[i])
+
+        num_files_for_selection = len(files_for_selection)
+        print('Files for train and test {}'.format(num_files_for_selection))
+
+        test_indices = np.random.random_integers(0, len(files_for_selection) - 1,
+                                                 size=(int(len(files_for_selection) * args.test_proportion), 1))
+        test_indices = test_indices.flatten()
+        test_samples = []
+        for i in test_indices:
+            test_samples.append(files_for_selection[i])
+        test_indices = np.flip(np.sort(test_indices))
+        for i in test_indices:
+            del files_for_selection[i]
+        train_samples = files_for_selection
+
+        print('Test set {} ({}) Train set {} ({})'.format(len(test_samples),
+                                                          float(len(test_samples)) / float(num_files_for_selection),
+                                                          len(train_samples),
+                                                          float(len(train_samples)) / float(num_files_for_selection)))
+
+        # Write the splits to file
+        train_file = join(args.ho3d_path, 'splits', 'all_grasp_train.txt')
+        f = open(train_file, "w")
+        for s in train_samples:
+            f.write("{}\n".format(s))
+        f.close()
+        test_file = join(args.ho3d_path, 'splits', 'all_grasp_test.txt')
+        f = open(test_file, "w")
+        for s in test_samples:
+            f.write("{}\n".format(s))
+        f.close()
     else:
-        for f in file_dict[args.subject_name]:
-            files_for_selection.append(args.subject_name + str(f[0]) + "/" + str(f[1]))
-    num_files_for_selection = len(files_for_selection)
-    print('Files for train and test {}'.format(num_files_for_selection))
+        subject_files = []
+        number_files = []
+        for s in args.subject_name:
+            s_files = []
+            for f in file_dict[s]:
+                s_files.append(s + str(f[0]) + "/" + str(f[1]))
+            subject_files.append(s_files)
+            number_files.append(len(s_files))
+        # Get the maximum number of files per subject
+        max_files = min(number_files)
+        # Randomly select files
+        for i in range(len(args.subject_name)):
+            if number_files[i] != max_files:
+                keep_indices = np.random.choice(number_files[i], size=(max_files, 1), replace=False)
+                keep_indices = keep_indices.flatten()
+                reduced_samples = []
+                for j in keep_indices:
+                    reduced_samples.append(subject_files[i][j])
+                # Set the subject files to the selected ones
+                subject_files[i] = reduced_samples
+        num_files_for_selection = len(args.subject_name) * max_files
+        print('Files for train and test {}'.format(num_files_for_selection))
+        num_test_samples = 0
+        num_train_samples = 0
 
-    test_indices = np.random.random_integers(0, len(files_for_selection) - 1,
-                                             size=(int(len(files_for_selection) * args.test_proportion), 1))
-    test_indices = test_indices.flatten()
-    test_samples = []
-    for i in test_indices:
-        test_samples.append(files_for_selection[i])
-    test_indices = np.flip(np.sort(test_indices))
-    for i in test_indices:
-        del files_for_selection[i]
-    train_samples = files_for_selection
+        for i in range(len(args.subject_name)):
+            test_indices = np.random.random_integers(0, len(subject_files[i]) - 1,
+                                                     size=(int(len(subject_files[i]) * args.test_proportion), 1))
+            test_indices = test_indices.flatten()
+            test_samples = []
+            for j in test_indices:
+                test_samples.append(subject_files[i][j])
+            test_indices = np.flip(np.sort(test_indices))
+            for j in test_indices:
+                del subject_files[i][j]
+            train_samples = subject_files[i]
 
-    print('Test set {} ({}) Train set {} ({})'.format(len(test_samples),
-                                                      float(len(test_samples)) / float(num_files_for_selection),
-                                                      len(train_samples),
-                                                      float(len(train_samples)) / float(num_files_for_selection)))
+            # Write the splits to file
+            train_file = join(args.ho3d_path, 'splits', str(args.subject_name[i]) + '_grasp_train.txt')
+            f = open(train_file, "w")
+            for s in train_samples:
+                f.write("{}\n".format(s))
+            f.close()
+            test_file = join(args.ho3d_path, 'splits', str(args.subject_name[i]) + '_grasp_test.txt')
+            f = open(test_file, "w")
+            for s in test_samples:
+                f.write("{}\n".format(s))
+            f.close()
 
-    # Write the splits to file
-    train_file = join(args.ho3d_path, 'grasp_train.txt')
-    f = open(train_file, "w")
-    for s in train_samples:
-        f.write("{}\n".format(s))
-    f.close()
-    test_file = join(args.ho3d_path, 'grasp_test.txt')
-    f = open(test_file, "w")
-    for s in test_samples:
-        f.write("{}\n".format(s))
-    f.close()
+            num_test_samples += len(test_samples)
+            num_train_samples += len(train_samples)
+
+            print('{} : Test set {} ({}) Train set {} ({})'.format(str(args.subject_name[i]), len(test_samples),
+                                                              float(len(test_samples)) / float(max_files),
+                                                              len(train_samples),
+                                                              float(len(train_samples)) / float(max_files)))
+
+        print('----------------------------------------------------------')
+        print('Test set {} ({}) Train set {} ({})'.format(num_test_samples,
+                                                          float(num_test_samples) / float(num_files_for_selection),
+                                                          num_train_samples,
+                                                          float(num_train_samples) / float(num_files_for_selection)))
+        print('----------------------------------------------------------')

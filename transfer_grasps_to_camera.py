@@ -154,15 +154,17 @@ def transform_grasps_to_target(args, transform):
         # Create the filename for the metadata file
         target_grasp_filename = os.path.join(args.ho3d_path, 'train', args.target, 'meta',
                                              'grasp_bl_' + str(id) + '.pkl')
-        print('Processing file {}'.format(target_grasp_filename))
-
         gripper_transform = load_pickle_data(target_grasp_filename)
         gripper_transform = gripper_transform.reshape(4, 4)
         tt = np.matmul(np.linalg.inv(transform), gripper_transform)
         source_grasp_filename = os.path.join(args.ho3d_path, 'train', args.source, 'meta',
                                              'grasp_bl_' + str(id) + '.pkl')
-        with open(source_grasp_filename, 'wb') as f:
-            pickle.dump(tt, f)
+        if exists(source_grasp_filename):
+            print('File already exists: {}'.format(source_grasp_filename))
+        else:
+            print('Saving file {}'.format(source_grasp_filename))
+            with open(source_grasp_filename, 'wb') as f:
+                pickle.dump(tt, f)
 
 
 if __name__ == '__main__':
@@ -172,8 +174,8 @@ if __name__ == '__main__':
     args.ho3d_path = '/home/tpatten/v4rtemp/datasets/HandTracking/HO3D_v2/'
     args.models_path = '/home/tpatten/v4rtemp/datasets/HandTracking/HO3D_v2/models'
     args.gripper_cloud_path = 'hand_open_new.pcd'
-    args.target = 'ABF10'
-    args.source = 'ABF14'
+    args.target = 'GSF10'  # The first in the sequence!!
+    args.source = 'GSF14'
     args.visualize = False
     args.process_grasps = True
 
