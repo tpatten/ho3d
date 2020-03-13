@@ -6,6 +6,8 @@ import pip
 import argparse
 from utils.vis_utils import *
 import random
+from opendr.renderer import DepthRenderer
+from opendr.camera import ProjectPoints
 
 def install(package):
     if hasattr(pip, 'main'):
@@ -174,6 +176,21 @@ if __name__ == '__main__':
             cv2.imshow("Object Contour", obj_contour_image)
 
             # # ----- HAND
+            rn = DepthRenderer()
+            rn.camera = ProjectPoints(v=vertices[0], rt=np.zeros(3), t=np.zeros(3), f=np.array([fx, fy]),
+                                      c=np.array([u0, v0]), k=np.zeros(5))
+            rn.frustum = {'near': 0.01, 'far': 1.5, 'width': img_w, 'height': img_h}
+            rn.set(v=vertices[0], f=mano.faces, bgcolor=np.zeros(3))
+            # render
+            mano_rendered = rn.r
+            # show
+            cv2.imshow('Depth Image', depth)
+            cv2.imshow('MANO Rendered', mano_rendered)
+            cv2.imshow('Image GT Annotation', imgAnno_gt)
+            cv2.imshow('Image MANO Annotation', imgAnno_mano)
+
+
+
             if hasattr(handMesh, 'r'):
                 hand_vertices = open3d.utility.Vector3dVector(np.copy(handMesh.r))
             elif hasattr(handMesh, 'v'):
