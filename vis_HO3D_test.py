@@ -6,8 +6,6 @@ import pip
 import argparse
 from utils.vis_utils import *
 import random
-from opendr.renderer import DepthRenderer
-from opendr.camera import ProjectPoints
 
 def install(package):
     if hasattr(pip, 'main'):
@@ -163,11 +161,10 @@ if __name__ == '__main__':
             obj_mask = np.zeros((img.shape[0], img.shape[1]))
             for uv in obj_uv:
                 obj_mask[int(uv[1]), 640 - int(uv[0])] = 255
-
-            cv2.imshow("Object Mask", obj_mask)
-
             kernel = np.ones((5, 5), np.uint8)
             obj_closing = cv2.morphologyEx(obj_mask, cv2.MORPH_CLOSE, kernel)
+
+            cv2.imshow("Object Mask", obj_closing)
             #cv2.imshow("Closing", closing)
 
             obj_contour, _ = cv2.findContours(np.uint8(obj_closing), cv2.RETR_CCOMP, cv2.CHAIN_APPROX_TC89_L1)
@@ -176,58 +173,35 @@ if __name__ == '__main__':
             cv2.imshow("Object Contour", obj_contour_image)
 
             # # ----- HAND
-            rn = DepthRenderer()
-            rn.camera = ProjectPoints(v=vertices[0], rt=np.zeros(3), t=np.zeros(3), f=np.array([fx, fy]),
-                                      c=np.array([u0, v0]), k=np.zeros(5))
-            rn.frustum = {'near': 0.01, 'far': 1.5, 'width': img_w, 'height': img_h}
-            rn.set(v=vertices[0], f=mano.faces, bgcolor=np.zeros(3))
-            # render
-            mano_rendered = rn.r
-            # show
-            cv2.imshow('Depth Image', depth)
-            cv2.imshow('MANO Rendered', mano_rendered)
-            cv2.imshow('Image GT Annotation', imgAnno_gt)
-            cv2.imshow('Image MANO Annotation', imgAnno_mano)
-
-
-
             if hasattr(handMesh, 'r'):
                 hand_vertices = open3d.utility.Vector3dVector(np.copy(handMesh.r))
             elif hasattr(handMesh, 'v'):
                 hand_vertices = open3d.utility.Vector3dVector(np.copy(handMesh.v))
 
             hand_uv = projectPoints(hand_vertices, anno['camMat'])
+
             hand_mask = np.zeros((img.shape[0], img.shape[1]))
             for uv in hand_uv:
                 hand_mask[int(uv[1]), 640 - int(uv[0])] = 255
+
+            mano_pkl_path = 'mano_v1_2/models/MANO_RIGHT.pkl'
+            with open(mano_pkl_path, 'rb') as f:
+                model = pickle.load(f, encoding='latin1')
+            faces = model['f']
+            for face in faces:
+                triangle_cnt = [(640 - int(hand_uv[face[0]][0]), int(hand_uv[face[0]][1])),
+                                (640 - int(hand_uv[face[1]][0]), int(hand_uv[face[1]][1])),
+                                (640 - int(hand_uv[face[2]][0]), int(hand_uv[face[2]][1]))]
+
+                cv2.drawContours(hand_mask, [np.asarray(triangle_cnt)], 0, 255, -1)
 
             cv2.imshow("Hand Mask", hand_mask)
 
-            # for each point, find its nearest and create a new point that is their mean
-            hand_vertices = np.asarray(hand_vertices)
-            hand_pcd = open3d.geometry.PointCloud()
-            hand_pcd.points = open3d.utility.Vector3dVector(hand_vertices)
-            kd_tree = open3d.geometry.KDTreeFlann(hand_pcd)
-            for i in range(3):
-                new_vertices = copy.deepcopy(hand_vertices)
-                for j in range(hand_vertices.shape[0]):
-                    _, idx, _ = kd_tree.search_knn_vector_3d(hand_vertices[j], 2)
-                    mid_point = 0.5 * (hand_vertices[j] + hand_vertices[idx[1]])
-                    new_vertices[j] = mid_point
-                hand_vertices = np.vstack((hand_vertices, new_vertices))
+            # kernel = np.ones((10, 10), np.uint8)
+            #hand_closing = cv2.morphologyEx(hand_mask, cv2.MORPH_CLOSE, kernel)
+            #cv2.imshow("Hand Closing", hand_closing)
 
-            hand_uv = projectPoints(hand_vertices, anno['camMat'])
-            hand_mask = np.zeros((img.shape[0], img.shape[1]))
-            for uv in hand_uv:
-                hand_mask[int(uv[1]), 640 - int(uv[0])] = 255
-
-            cv2.imshow("Hand Mask 2", hand_mask)
-
-            kernel = np.ones((10, 10), np.uint8)
-            hand_closing = cv2.morphologyEx(hand_mask, cv2.MORPH_CLOSE, kernel)
-            cv2.imshow("Hand Closing", hand_closing)
-
-            hand_contour, _ = cv2.findContours(np.uint8(hand_closing), cv2.RETR_CCOMP, cv2.CHAIN_APPROX_TC89_L1)
+            hand_contour, _ = cv2.findContours(np.uint8(hand_mask), cv2.RETR_CCOMP, cv2.CHAIN_APPROX_TC89_L1)
             hand_contour_image = copy.deepcopy(img)
             hand_contour_image = cv2.drawContours(hand_contour_image, hand_contour, -1, (255, 0, 0), 2, lineType=cv2.LINE_AA)
             cv2.imshow("Hand Contour", hand_contour_image)
