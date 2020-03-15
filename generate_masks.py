@@ -1,3 +1,6 @@
+# author: Tim Patten
+# contact: patten@acin.tuwien.ac.at
+
 import argparse
 from utils.grasp_utils import *
 from mano.webuser.smpl_handpca_wrapper_HAND_only import load_model
@@ -9,6 +12,13 @@ import copy
 MANO_MODEL_PATH = './mano/models/MANO_RIGHT.pkl'
 HAND_LABEL = 'hand'
 OBJECT_LABEL = 'object'
+VALID_VAL = 255
+DIST_THRESHOLD = 0.0005  # 0.006116263647763826
+MORPH_CLOSE = True
+HAND_MASK_DIR = 'hand'
+OBJECT_MASK_DIR = 'object'
+HAND_MASK_VISIBLE_DIR = 'hand_vis'
+OBJECT_MASK_VISIBLE_DIR = 'object_vis'
 
 
 class MaskExtractor:
@@ -16,16 +26,11 @@ class MaskExtractor:
         self.args = args
         self.base_dir = args.ho3d_path
         self.data_split = 'train'
-
         self.rgb = None
         self.depth = None
         self.anno = None
-
         self.scene_kd_tree = None
-
-        #with open(MANO_MODEL_PATH, 'rb') as f:
-        #    model = pickle.load(f, encoding='latin1')
-        #self.faces = model['f']
+        self.mano_model = load_model(MANO_MODEL_PATH, ncomps=6, flat_hand_mean=True)
 
         self.compute_masks()
 
@@ -34,46 +39,86 @@ class MaskExtractor:
 
         # For each directory in the split
         for d in dirs:
-            ids = os.listdir(os.path.join(self.base_dir, self.data_split, d, 'rgb'))
+            # Create the directories to save mask data
+            mask_dir = os.path.join(self.base_dir, self.data_split, d, 'mask')
+            self.create_directories(mask_dir)
+
+            # Get the scene ids
+            frame_ids = os.listdir(os.path.join(self.base_dir, self.data_split, d, 'rgb'))
+
             # For each frame in the directory
-            for i in ids:
+            for fid in frame_ids:
                 # Get the id
-                id = i.split('.')[0]
+                frame_id = fid.split('.')[0]
                 # Create the filename for the metadata file
-                meta_filename = os.path.join(self.base_dir, self.data_split, d, 'meta', str(id) + '.pkl')
+                meta_filename = os.path.join(self.base_dir, self.data_split, d, 'meta', str(frame_id) + '.pkl')
                 print('Processing file {}'.format(meta_filename))
 
-                # Read image, depths maps and annotations
-                self.rgb, self.depth, self.anno = self.load_data(d, id)
+                save_filename = os.path.join(mask_dir, HAND_MASK_DIR, str(frame_id) + '.png')
+                if self.args.save and os.path.exists(save_filename):
+                    print('Already exists, skipping')
+                else:
+                    # Read image, depths maps and annotations
+                    self.rgb, self.depth, self.anno = self.load_data(d, frame_id)
 
-                # Get hand and masks
-                _, hand_mesh = forwardKinematics(self.anno['handPose'], self.anno['handTrans'], self.anno['handBeta'])
-                object_mesh = read_obj(os.path.join(self.base_dir, 'models', self.anno['objName'], 'textured_simple.obj'))
-                object_mesh.v = np.matmul(object_mesh.v, cv2.Rodrigues(self.anno['objRot'])[0].T) + self.anno['objTrans']
-                hand_mask, object_mask = self.get_masks([hand_mesh.r, hand_mesh.f], [object_mesh.v, object_mesh.f])
+                    # Get hand and object meshes
+                    #_, hand_mesh = forwardKinematics(self.anno['handPose'], self.anno['handTrans'], self.anno['handBeta'])
+                    hand_mesh = self.get_hand_mesh()
+                    object_mesh = self.get_object_mesh()
 
-                #'''
-                # Get visible masks
-                # hand_mask_visible, object_mask_visible = self.get_visible_masks(hand_mask, object_mask)
-                scene_cloud_filename = os.path.join(self.base_dir, self.data_split, d, 'meta', 'cloud_' + str(id) + '.ply')
-                scene_pcd = o3d.io.read_point_cloud(scene_cloud_filename)
-                self.scene_kd_tree = o3d.geometry.KDTreeFlann(scene_pcd)
-                hand_mask_visible, object_mask_visible = self.get_visible_masks(
-                    [hand_mesh.r, hand_mesh.f], [object_mesh.v, object_mesh.f])
-                #'''
-                #hand_mask_visible = None
-                #object_mask_visible = None
+                    # Get hand and object masks
+                    hand_mask, object_mask = self.get_masks([hand_mesh.r, hand_mesh.f], [object_mesh.v, object_mesh.f],
+                                                            apply_close=MORPH_CLOSE)
 
-                # Visualize
-                labels = [HAND_LABEL, OBJECT_LABEL]
-                if self.args.visualize:
-                    self.visualize([hand_mask, object_mask], [hand_mask_visible, object_mask_visible], labels)
+                    # Get visible masks
+                    scene_cloud_filename = os.path.join(
+                        self.base_dir, self.data_split, d, 'meta', 'cloud_' + str(frame_id) + '.ply')
+                    scene_pcd = o3d.io.read_point_cloud(scene_cloud_filename)
+                    self.scene_kd_tree = o3d.geometry.KDTreeFlann(scene_pcd)
+                    hand_mask_visible = self.get_visible_mask([hand_mesh.r, hand_mesh.f], apply_close=MORPH_CLOSE)
+                    object_mask_visible = self.subtract_mask(object_mask, hand_mask_visible)
+                    kernel = np.ones((7, 7), np.uint8)
+                    object_mask_visible = cv2.erode(object_mask_visible, kernel, iterations=1)
 
-                # Save
-                if self.args.save:
-                    self.save_masks([hand_mask, object_mask], [hand_mask_visible, object_mask_visible], labels)
+                    # Visualize
+                    labels = [HAND_LABEL, OBJECT_LABEL]
+                    if self.args.visualize:
+                        self.visualize([hand_mask, object_mask], [hand_mask_visible, object_mask_visible], labels)
 
-                sys.exit(0)
+                    # Save
+                    if self.args.save:
+                        self.save_masks(mask_dir, frame_id, [hand_mask, object_mask],
+                                        [hand_mask_visible, object_mask_visible])
+
+                # sys.exit(0)
+            # sys.exit(0)
+
+    @staticmethod
+    def create_directories(mask_dir):
+        if not os.path.isdir(mask_dir):
+            try:
+                temp_dir = os.path.join(mask_dir, HAND_MASK_DIR)
+                os.makedirs(temp_dir)
+            except OSError:
+                pass
+
+            try:
+                temp_dir = os.path.join(mask_dir, OBJECT_MASK_DIR)
+                os.makedirs(temp_dir)
+            except OSError:
+                pass
+
+            try:
+                temp_dir = os.path.join(mask_dir, HAND_MASK_VISIBLE_DIR)
+                os.makedirs(temp_dir)
+            except OSError:
+                pass
+
+            try:
+                temp_dir = os.path.join(mask_dir, OBJECT_MASK_VISIBLE_DIR)
+                os.makedirs(temp_dir)
+            except OSError:
+                pass
 
     def load_data(self, seq_name, frame_id):
         rgb = read_RGB_img(self.base_dir, seq_name, frame_id, self.data_split)
@@ -81,47 +126,20 @@ class MaskExtractor:
         anno = read_annotation(self.base_dir, seq_name, frame_id, self.data_split)
         return rgb, depth, anno
 
-    def get_masks(self, hand_mesh, object_mesh):
-        # return self.get_hand_mask(hand_mesh), self.get_object_mask(object_mesh)
-        return self.get_mask(hand_mesh), self.get_mask(object_mesh)
+    def get_hand_mesh(self):
+        hand_mesh = copy.deepcopy(self.mano_model)
+        hand_mesh.fullpose[:] = self.anno['handPose']
+        hand_mesh.trans[:] = self.anno['handTrans']
+        hand_mesh.betas[:] = self.anno['handBeta']
+        return hand_mesh
 
-    '''
-    def get_hand_mask(self, hand_mesh):
-        if hasattr(hand_mesh, 'r'):
-            hand_vertices = o3d.utility.Vector3dVector(np.copy(hand_mesh.r))
-        elif hasattr(hand_mesh, 'v'):
-            hand_vertices = o3d.utility.Vector3dVector(np.copy(hand_mesh.v))
+    def get_object_mesh(self):
+        object_mesh = read_obj(os.path.join(self.base_dir, 'models', self.anno['objName'], 'textured_simple.obj'))
+        object_mesh.v = np.matmul(object_mesh.v, cv2.Rodrigues(self.anno['objRot'])[0].T) + self.anno['objTrans']
+        return object_mesh
 
-        hand_uv = projectPoints(hand_vertices, self.anno['camMat'])
-
-        hand_mask = np.zeros((self.rgb.shape[0], self.rgb.shape[1]))
-        for uv in hand_uv:
-            hand_mask[int(uv[1]), 640 - int(uv[0])] = 255
-
-        for face in self.faces:
-            triangle_cnt = [(640 - int(hand_uv[face[0]][0]), int(hand_uv[face[0]][1])),
-                            (640 - int(hand_uv[face[1]][0]), int(hand_uv[face[1]][1])),
-                            (640 - int(hand_uv[face[2]][0]), int(hand_uv[face[2]][1]))]
-
-            cv2.drawContours(hand_mask, [np.asarray(triangle_cnt)], 0, 255, -1)
-
-        return hand_mask
-
-    def get_object_mask(self, object_mesh):
-        # Get the UV coordinates
-        obj_uv = projectPoints(object_mesh.v, self.anno['camMat'])
-
-        # Mask the object points
-        obj_mask = np.zeros((self.rgb.shape[0], self.rgb.shape[1]))
-        for uv in obj_uv:
-            obj_mask[int(uv[1]), 640 - int(uv[0])] = 255
-
-        # Morphological closing operation
-        kernel = np.ones((5, 5), np.uint8)
-        obj_closing = cv2.morphologyEx(obj_mask, cv2.MORPH_CLOSE, kernel)
-
-        return obj_closing
-    '''
+    def get_masks(self, hand_mesh, object_mesh, apply_close=False):
+        return self.get_mask(hand_mesh, apply_close), self.get_mask(object_mesh, apply_close)
 
     def get_mask(self, mesh, apply_close=False):
         # Get the uv coordinates
@@ -134,7 +152,7 @@ class MaskExtractor:
                             (640 - int(mesh_uv[face[1]][0]), int(mesh_uv[face[1]][1])),
                             (640 - int(mesh_uv[face[2]][0]), int(mesh_uv[face[2]][1]))]
 
-            cv2.drawContours(mask, [np.asarray(triangle_cnt)], 0, 255, -1)
+            cv2.drawContours(mask, [np.asarray(triangle_cnt)], 0, VALID_VAL, -1)
 
         # Morphological closing operation
         if apply_close:
@@ -143,22 +161,15 @@ class MaskExtractor:
 
         return mask
 
-    def get_visible_masks(self, hand_mesh, object_mesh):
-        return self.get_visible_mask(hand_mesh), self.get_visible_mask(object_mesh)
-
     def get_visible_mask(self, mesh, apply_close=False):
-        dist_threshold = 0.0005  # 0.006116263647763826
         invalid_vertices = []
         for i in range(mesh[0].shape[0]):
             _, _, dist = self.scene_kd_tree.search_knn_vector_3d(mesh[0][i], 1)
-            if dist[0] > dist_threshold:
+            if dist[0] > DIST_THRESHOLD:
                 invalid_vertices.append(i)
 
         valid_faces = []
-        counter = 0
         for face in mesh[1]:
-            counter += 1
-            print(str(counter) + '/' + str(mesh[1].shape[0]))
             valid_face = True
             for idx in invalid_vertices:
                 if face[0] == idx or face[1] == idx or face[2] == idx:
@@ -170,121 +181,23 @@ class MaskExtractor:
 
         mask_vis = self.get_mask([mesh[0], valid_faces], apply_close)
 
-        '''
-        # Create visualizer
-        vis = o3d.visualization.Visualizer()
-        vis.create_window()
-
-        # Plot the object cloud
-        #vis.add_geometry(self.pcd)
-
-        # Plot scene
-        vis.add_geometry(scene_pcd)
-
-        # Visualize hand
-        mesh = o3d.geometry.TriangleMesh()
-        mesh.vertices = o3d.utility.Vector3dVector(np.copy(vertices))
-        # mesh.triangles = o3d.utility.Vector3iVector(np.copy(hand_mesh.f))
-        mesh.triangles = o3d.utility.Vector3iVector(np.copy(faces))
-        mesh.vertex_colors = o3d.utility.Vector3dVector(np.tile(np.array([[0.9, 0.4, 0.4]]), [vertices.shape[0], 1]))
-        vis.add_geometry(mesh)
-
-        vis.run()
-        vis.destroy_window()
-        '''
-
         return mask_vis
-
-    def get_visible_masks_old(self, hand_mask, object_mask):
-        hand_vis = copy.deepcopy(hand_mask)
-        object_vis = copy.deepcopy(object_mask)
-
-        # Get the pixels that overlap the hand and object
-        overlap = np.zeros(hand_mask.shape)
-        for u in range(hand_mask.shape[0]):
-            for v in range(hand_mask.shape[1]):
-                if hand_mask[u, v] == 255 and object_mask[u, v] == 255:
-                    overlap[u, v] = 255
-
-        # Remove overlapping pixels from the masks
-        overlap_indices = np.where(overlap == 255)
-        for i in range(len(overlap_indices[0])):
-            hand_vis[overlap_indices[0][i], overlap_indices[1][i]] = 0
-            object_vis[overlap_indices[0][i], overlap_indices[1][i]] = 0
-
-        '''
-        # Find all boundary points
-        boundary = np.zeros(hand_mask.shape)
-        for i in range(len(overlap_indices[0])):
-            # Left
-            if overlap[overlap_indices[0][i], overlap_indices[1][i] - 1] == 0:
-                boundary[overlap_indices[0][i], overlap_indices[1][i]] = 255
-            # Right
-            elif overlap[overlap_indices[0][i], overlap_indices[1][i] + 1] == 0:
-                boundary[overlap_indices[0][i], overlap_indices[1][i]] = 255
-            # Top
-            elif overlap[overlap_indices[0][i] - 1, overlap_indices[1][i]] == 0:
-                boundary[overlap_indices[0][i], overlap_indices[1][i]] = 255
-            # Bottom
-            elif overlap[overlap_indices[0][i] + 1, overlap_indices[1][i]] == 0:
-                boundary[overlap_indices[0][i], overlap_indices[1][i]] = 255
-        '''
-
-        # Find all boundary points
-        left_lab = 'left'
-        right_lab = 'right'
-        top_lab = 'top'
-        bottom_lab = 'bottom'
-        boundary = {left_lab: [], right_lab: [], top_lab: [], bottom_lab: []}
-        for i in range(len(overlap_indices[0])):
-            # Left
-            if overlap[overlap_indices[0][i], overlap_indices[1][i] - 1] == 0:
-                boundary[left_lab].append((overlap_indices[0][i], overlap_indices[1][i]))
-            # Right
-            elif overlap[overlap_indices[0][i], overlap_indices[1][i] + 1] == 0:
-                boundary[right_lab].append((overlap_indices[0][i], overlap_indices[1][i]))
-            # Top
-            elif overlap[overlap_indices[0][i] - 1, overlap_indices[1][i]] == 0:
-                boundary[bottom_lab].append((overlap_indices[0][i], overlap_indices[1][i]))
-            # Bottom
-            elif overlap[overlap_indices[0][i] + 1, overlap_indices[1][i]] == 0:
-                boundary[bottom_lab].append((overlap_indices[0][i], overlap_indices[1][i]))
-
-        # For each boundary pixel, find if the nearest label is hand or object
-        d_thresh = 0.00001
-        depth_copy = copy.deepcopy(self.rgb)
-        for p in boundary[left_lab]:
-            if hand_mask[p[0], p[1] - 1] == 255:
-                d_overlap = self.depth[p[0], p[1]]
-                d_neighbor = self.depth[p[0], p[1] - 1]
-                d_diff = np.abs(d_overlap - d_neighbor)
-                print(d_diff)
-                if d_diff < d_thresh:
-                    print('hand -> hand')
-                else:
-                    print('hand -> object')
-                depth_copy[p[0], p[1]] = [0, 0, 255]
-                depth_copy[p[0], p[1] - 1] = [0, 255, 0]
-            elif object_mask[p[0], p[1] - 1] == 255:
-                d_overlap = self.depth[p[0], p[1]]
-                d_neighbor = self.depth[p[0], p[1] - 1]
-                d_diff = np.abs(d_overlap - d_neighbor)
-                if d_diff < d_thresh:
-                    print('object -> object')
-                else:
-                    print('object -> hand')
-            else:
-                print('none')
-        cv2.imshow("Pixel", depth_copy)
-        cv2.waitKey(0)
-
-        return hand_vis, object_vis
 
     def draw_contour(self, mask):
         contour, _ = cv2.findContours(np.uint8(mask), cv2.RETR_CCOMP, cv2.CHAIN_APPROX_TC89_L1)
         contour_image = copy.deepcopy(self.rgb)
         contour_image = cv2.drawContours(contour_image, contour, -1, (255, 0, 0), 2, lineType=cv2.LINE_AA)
         return contour_image
+
+    @staticmethod
+    def subtract_mask(mask_a, mask_b):
+        mask_s = np.copy(mask_a)
+        for u in range(mask_a.shape[0]):
+            for v in range(mask_a.shape[1]):
+                if mask_a[u, v] == VALID_VAL:
+                    if mask_b[u, v] == VALID_VAL:
+                        mask_s[u, v] = 0
+        return mask_s
 
     @staticmethod
     def apply_mask(image, mask, erode=False):
@@ -339,8 +252,12 @@ class MaskExtractor:
 
         plt.show()
 
-    def save_masks(self, masks, visible_masks, labels):
-        return True
+    @staticmethod
+    def save_masks(mask_dir, frame_id, masks, visible_masks):
+        cv2.imwrite(os.path.join(mask_dir, HAND_MASK_DIR, str(frame_id) + '.png'), masks[0])
+        cv2.imwrite(os.path.join(mask_dir, OBJECT_MASK_DIR, str(frame_id) + '.png'), masks[1])
+        cv2.imwrite(os.path.join(mask_dir, HAND_MASK_VISIBLE_DIR, str(frame_id) + '.png'), visible_masks[0])
+        cv2.imwrite(os.path.join(mask_dir, OBJECT_MASK_VISIBLE_DIR, str(frame_id) + '.png'), visible_masks[1])
 
 
 def forwardKinematics(fullpose, trans, beta):
@@ -370,7 +287,7 @@ if __name__ == '__main__':
     args = parser.parse_args()
     args.ho3d_path = '/home/tpatten/v4rtemp/datasets/HandTracking/HO3D_v2/'
     args.models_path = '/home/tpatten/v4rtemp/datasets/HandTracking/HO3D_v2/models'
-    args.visualize = True
-    args.save = False
+    args.visualize = False
+    args.save = True
 
     mask_extractor = MaskExtractor(args)
