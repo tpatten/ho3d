@@ -21,9 +21,11 @@ class MaskExtractor:
         self.depth = None
         self.anno = None
 
-        with open(MANO_MODEL_PATH, 'rb') as f:
-            model = pickle.load(f, encoding='latin1')
-        self.faces = model['f']
+        self.scene_kd_tree = None
+
+        #with open(MANO_MODEL_PATH, 'rb') as f:
+        #    model = pickle.load(f, encoding='latin1')
+        #self.faces = model['f']
 
         self.compute_masks()
 
@@ -48,18 +50,19 @@ class MaskExtractor:
                 _, hand_mesh = forwardKinematics(self.anno['handPose'], self.anno['handTrans'], self.anno['handBeta'])
                 object_mesh = read_obj(os.path.join(self.base_dir, 'models', self.anno['objName'], 'textured_simple.obj'))
                 object_mesh.v = np.matmul(object_mesh.v, cv2.Rodrigues(self.anno['objRot'])[0].T) + self.anno['objTrans']
-                hand_mask, object_mask = self.get_masks(hand_mesh, object_mesh)
+                hand_mask, object_mask = self.get_masks([hand_mesh.r, hand_mesh.f], [object_mesh.v, object_mesh.f])
 
-                '''
+                #'''
                 # Get visible masks
                 # hand_mask_visible, object_mask_visible = self.get_visible_masks(hand_mask, object_mask)
                 scene_cloud_filename = os.path.join(self.base_dir, self.data_split, d, 'meta', 'cloud_' + str(id) + '.ply')
                 scene_pcd = o3d.io.read_point_cloud(scene_cloud_filename)
-                hand_mask_visible, object_mask_visible = self.get_visible_masks_from_cloud(hand_mask, object_mask,
-                                                                                           scene_pcd)
-                '''
-                hand_mask_visible = None
-                object_mask_visible = None
+                self.scene_kd_tree = o3d.geometry.KDTreeFlann(scene_pcd)
+                hand_mask_visible, object_mask_visible = self.get_visible_masks(
+                    [hand_mesh.r, hand_mesh.f], [object_mesh.v, object_mesh.f])
+                #'''
+                #hand_mask_visible = None
+                #object_mask_visible = None
 
                 # Visualize
                 labels = [HAND_LABEL, OBJECT_LABEL]
@@ -79,8 +82,10 @@ class MaskExtractor:
         return rgb, depth, anno
 
     def get_masks(self, hand_mesh, object_mesh):
-        return self.get_hand_mask(hand_mesh), self.get_object_mask(object_mesh)
+        # return self.get_hand_mask(hand_mesh), self.get_object_mask(object_mesh)
+        return self.get_mask(hand_mesh), self.get_mask(object_mesh)
 
+    '''
     def get_hand_mask(self, hand_mesh):
         if hasattr(hand_mesh, 'r'):
             hand_vertices = o3d.utility.Vector3dVector(np.copy(hand_mesh.r))
@@ -116,8 +121,55 @@ class MaskExtractor:
         obj_closing = cv2.morphologyEx(obj_mask, cv2.MORPH_CLOSE, kernel)
 
         return obj_closing
+    '''
 
-    def get_visible_masks_from_cloud(self, hand_mask, object_mask, scene_pcd):
+    def get_mask(self, mesh, apply_close=False):
+        # Get the uv coordinates
+        mesh_uv = projectPoints(mesh[0], self.anno['camMat'])
+
+        # Generate mask by filling in the faces
+        mask = np.zeros((self.rgb.shape[0], self.rgb.shape[1]))
+        for face in mesh[1]:
+            triangle_cnt = [(640 - int(mesh_uv[face[0]][0]), int(mesh_uv[face[0]][1])),
+                            (640 - int(mesh_uv[face[1]][0]), int(mesh_uv[face[1]][1])),
+                            (640 - int(mesh_uv[face[2]][0]), int(mesh_uv[face[2]][1]))]
+
+            cv2.drawContours(mask, [np.asarray(triangle_cnt)], 0, 255, -1)
+
+        # Morphological closing operation
+        if apply_close:
+            kernel = np.ones((5, 5), np.uint8)
+            mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel)
+
+        return mask
+
+    def get_visible_masks(self, hand_mesh, object_mesh):
+        return self.get_visible_mask(hand_mesh), self.get_visible_mask(object_mesh)
+
+    def get_visible_mask(self, mesh, apply_close=False):
+        dist_threshold = 0.0005  # 0.006116263647763826
+        invalid_vertices = []
+        for i in range(mesh[0].shape[0]):
+            _, _, dist = self.scene_kd_tree.search_knn_vector_3d(mesh[0][i], 1)
+            if dist[0] > dist_threshold:
+                invalid_vertices.append(i)
+
+        valid_faces = []
+        counter = 0
+        for face in mesh[1]:
+            counter += 1
+            print(str(counter) + '/' + str(mesh[1].shape[0]))
+            valid_face = True
+            for idx in invalid_vertices:
+                if face[0] == idx or face[1] == idx or face[2] == idx:
+                    valid_face = False
+                    break
+            if valid_face:
+                valid_faces.append(face)
+        valid_faces = np.asarray(valid_faces)
+
+        mask_vis = self.get_mask([mesh[0], valid_faces], apply_close)
+
         '''
         # Create visualizer
         vis = o3d.visualization.Visualizer()
@@ -130,50 +182,20 @@ class MaskExtractor:
         vis.add_geometry(scene_pcd)
 
         # Visualize hand
-        _, hand_mesh = forwardKinematics(self.anno['handPose'], self.anno['handTrans'], self.anno['handBeta'])
         mesh = o3d.geometry.TriangleMesh()
-        if hasattr(hand_mesh, 'r'):
-            # mesh.vertices = o3d.utility.Vector3dVector(np.copy(hand_mesh.r) * 0.001)
-            mesh.vertices = o3d.utility.Vector3dVector(np.copy(hand_mesh.r))
-            num_vert = hand_mesh.r.shape[0]
-        elif hasattr(hand_mesh, 'v'):
-            # mesh.vertices = o3d.utility.Vector3dVector(np.copy(hand_mesh.v) * 0.001)
-            mesh.vertices = o3d.utility.Vector3dVector(np.copy(hand_mesh.v))
-            num_vert = hand_mesh.v.shape[0]
-        else:
-            raise Exception('Unknown Mesh format')
-        mesh.triangles = o3d.utility.Vector3iVector(np.copy(hand_mesh.f))
-        mesh.vertex_colors = o3d.utility.Vector3dVector(np.tile(np.array([[0.9, 0.4, 0.4]]), [num_vert, 1]))
+        mesh.vertices = o3d.utility.Vector3dVector(np.copy(vertices))
+        # mesh.triangles = o3d.utility.Vector3iVector(np.copy(hand_mesh.f))
+        mesh.triangles = o3d.utility.Vector3iVector(np.copy(faces))
+        mesh.vertex_colors = o3d.utility.Vector3dVector(np.tile(np.array([[0.9, 0.4, 0.4]]), [vertices.shape[0], 1]))
         vis.add_geometry(mesh)
 
         vis.run()
         vis.destroy_window()
         '''
 
-        scene_kd_tree = o3d.geometry.KDTreeFlann(scene_pcd)
-        _, hand_mesh = forwardKinematics(self.anno['handPose'], self.anno['handTrans'], self.anno['handBeta'])
-        if hasattr(hand_mesh, 'r'):
-            vertices = np.copy(hand_mesh.r)
-        elif hasattr(hand_mesh, 'v'):
-            vertices = np.copy(hand_mesh.v)
-        else:
-            raise Exception('Unknown Mesh format')
+        return mask_vis
 
-        print('Shape vertices: ', vertices.shape)
-
-        dist_threshold = 0.0005 # 0.006116263647763826
-        valid_vertices = []
-        for i in range(vertices.shape[0]):
-            _, idx, dist = scene_kd_tree.search_knn_vector_3d(vertices[i], 1)
-            if dist[0] < dist_threshold:
-                valid_vertices
-
-
-
-
-        return hand_mask, object_mask
-
-    def get_visible_masks(self, hand_mask, object_mask):
+    def get_visible_masks_old(self, hand_mask, object_mask):
         hand_vis = copy.deepcopy(hand_mask)
         object_vis = copy.deepcopy(object_mask)
 
@@ -255,17 +277,6 @@ class MaskExtractor:
                 print('none')
         cv2.imshow("Pixel", depth_copy)
         cv2.waitKey(0)
-
-
-        '''
-        # For each overlapping pixel, find the nearest pixel in the hand and object masks
-        for i in range(len(overlap_indices[0])):
-            # Top lef
-
-            # Top
-
-            # Top right
-        '''
 
         return hand_vis, object_vis
 
