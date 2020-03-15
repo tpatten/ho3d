@@ -184,8 +184,7 @@ if __name__ == '__main__':
             for uv in hand_uv:
                 hand_mask[int(uv[1]), 640 - int(uv[0])] = 255
 
-            mano_pkl_path = 'mano_v1_2/models/MANO_RIGHT.pkl'
-            with open(mano_pkl_path, 'rb') as f:
+            with open(MANO_MODEL_PATH, 'rb') as f:
                 model = pickle.load(f, encoding='latin1')
             faces = model['f']
             for face in faces:
