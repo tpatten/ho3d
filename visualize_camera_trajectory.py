@@ -13,6 +13,7 @@ HAND_MASK_DIR = 'hand'
 OBJECT_MASK_DIR = 'object'
 HAND_MASK_VISIBLE_DIR = 'hand_vis'
 OBJECT_MASK_VISIBLE_DIR = 'object_vis'
+COORD_CHANGE_MAT = np.array([[1., 0., 0.], [0, -1., 0.], [0., 0., -1.]], dtype=np.float32)
 
 
 class TrajectoryVisualizer:
@@ -35,13 +36,11 @@ class TrajectoryVisualizer:
         cam_poses = []
         mask_pcds = []
         scene_pcds = []
-        count = 0
-        base_cam_pose = np.eye(4)
-        for fid in frame_ids:
+        counter = 0
+        num_processed = 0
+        while counter < len(frame_ids):
             # Get the id
-            frame_id = fid.split('.')[0]
-            if frame_id == '0001':
-                frame_id = '0500'
+            frame_id = frame_ids[counter].split('.')[0]
             # Create the filename for the metadata file
             meta_filename = os.path.join(self.base_dir, self.data_split, self.args.scene, 'meta', str(frame_id) + '.pkl')
             print('Processing file {}'.format(meta_filename))
@@ -55,53 +54,41 @@ class TrajectoryVisualizer:
             mask = cv2.imread(mask_filename)
 
             # Extract the masked point cloud
-            obj_rot = self.anno['objRot']
-            obj_trans = self.anno['objTrans']
-            cloud, colors = self.image_to_world(mask, cut_z=np.linalg.norm(obj_trans)*1.1)
+            cloud, colors = self.image_to_world(mask, cut_z=np.linalg.norm(self.anno['objTrans'])*1.1)
+
+            # Transform the cloud and get the camera position
+            cloud, cam_pose = self.transform_to_object_frame(cloud)
+
+            # Create the point cloud for visualization
             mask_pcd = o3d.geometry.PointCloud()
             mask_pcd.points = o3d.utility.Vector3dVector(cloud)
             mask_pcd.colors = o3d.utility.Vector3dVector(colors)
             # mask_pcd.transform([[1, 0, 0, 0], [0, -1, 0, 0], [0, 0, -1, 0], [0, 0, 0, 1]])
 
-            coord_change_mat = np.array([[1., 0., 0.], [0, -1., 0.], [0., 0., -1.]], dtype=np.float32)
-            obj_trans = obj_trans.dot(coord_change_mat.T)
-            obj_rot = obj_rot.flatten().dot(coord_change_mat.T).reshape(self.anno['objRot'].shape)
-            rot_max = cv2.Rodrigues(obj_rot)[0].T
-
-            pts = np.asarray(mask_pcd.points)
-            pts -= obj_trans
-            pts = np.matmul(pts, np.linalg.inv(rot_max))
-            mask_pcd.points = o3d.utility.Vector3dVector(pts)
-
-            cam_pose = np.eye(4)
-            cam_pose[:3, :3] = rot_max
-            cam_pose[:3, 3] = np.matmul(-obj_trans, np.linalg.inv(rot_max))
-            print(cam_pose)
-
-            # Visualize
-            # self.visualize([cam_pose], [mask_pcd], [scene_pcd])
-            # sys.exit(0)
-
+            # Add to lists
             cam_poses.append(cam_pose)
             mask_pcds.append(mask_pcd)
             scene_pcds.append(scene_pcd)
 
-            break
-            count += 1
-            if count == 2:
+            # Increment counters
+            counter += self.args.skip
+            num_processed += 1
+
+            # Exit if reached the limit
+            if self.args.max_num > 0 and num_processed == self.args.max_num:
                 break
 
         # Visualize
-        # scene_pcds = None
-        self.visualize(cam_poses, mask_pcds, scene_pcds)
+        if self.args.visualize:
+            scene_pcds = None
+            self.visualize(cam_poses, mask_pcds, scene_pcds)
 
     def load_data(self, seq_name, frame_id):
         rgb = read_RGB_img(self.base_dir, seq_name, frame_id, self.data_split)
         depth = read_depth_img(self.base_dir, seq_name, frame_id, self.data_split)
         anno = read_annotation(self.base_dir, seq_name, frame_id, self.data_split)
 
-        # Create a cloud for visualization
-        # rgb_o3d = o3d.geometry.Image(rgb.astype(np.uint8))
+        # Create a cloud from the rgb and depth images
         rgb_o3d = o3d.geometry.Image(rgb)
         depth_o3d = o3d.geometry.Image(depth.astype(np.float32))
 
@@ -138,13 +125,31 @@ class TrajectoryVisualizer:
 
         return pts, colors
 
-    def visualize(self, cam_poses, mask_pcds, scene_pcds=None):
+    def transform_to_object_frame(self, cloud):
+        obj_trans = np.copy(self.anno['objTrans'])
+        obj_trans = obj_trans.dot(COORD_CHANGE_MAT.T)
+        obj_rot = np.copy(self.anno['objRot'])
+        obj_rot = obj_rot.flatten().dot(COORD_CHANGE_MAT.T).reshape(self.anno['objRot'].shape)
+        rot_max = cv2.Rodrigues(obj_rot)[0].T
+
+        cloud_tfd = np.copy(cloud)
+        cloud_tfd -= obj_trans
+        cloud_tfd = np.matmul(cloud_tfd, np.linalg.inv(rot_max))
+
+        cam_pose = np.eye(4)
+        cam_pose[:3, :3] = rot_max
+        cam_pose[:3, 3] = np.matmul(-obj_trans, np.linalg.inv(rot_max))
+
+        return cloud_tfd, cam_pose
+
+    @staticmethod
+    def visualize(cam_poses, mask_pcds, scene_pcds=None):
         # Create visualizer
         vis = o3d.visualization.Visualizer()
         vis.create_window()
 
         # Plot the coordinate frame
-        vis.add_geometry(o3d.create_mesh_coordinate_frame(size=0.5))
+        # vis.add_geometry(o3d.create_mesh_coordinate_frame(size=0.5))
 
         # Plot the object cloud
         for m in mask_pcds:
@@ -158,9 +163,8 @@ class TrajectoryVisualizer:
         # Plot camera pose
         for m in cam_poses:
             points = m[:3, :].T
-            points[0, :] += points[3, :]  # TODO tile this
-            points[1, :] += points[3, :]
-            points[2, :] += points[3, :]
+            points[0:3, :] *= 0.25
+            points[0:3, :] += np.tile(points[3, :], (3, 1))
             lines = [[3, 0], [3, 1], [3, 2]]
             line_colors = [[1., 0., 0.], [0., 1., 0.], [0., 0., 1.]]
             line_set = o3d.geometry.LineSet()
@@ -181,5 +185,7 @@ if __name__ == '__main__':
     args.scene = 'ABF10'
     args.visualize = True
     args.save = False
+    args.max_num = 10
+    args.skip = 100
 
     mask_extractor = TrajectoryVisualizer(args)
