@@ -25,7 +25,12 @@ class TrajectoryVisualizer:
         self.depth = None
         self.anno = None
         self.scene_pcd = None
+        if args.mask_erosion_kernel > 0:
+            self.erosion_kernel = np.ones((args.mask_erosion_kernel, args.mask_erosion_kernel), np.uint8)
+        else:
+            self.erosion_kernel = None
 
+        # Compute and visualize
         self.visualize_trajectory()
 
     def visualize_trajectory(self):
@@ -51,7 +56,9 @@ class TrajectoryVisualizer:
             # Read the mask
             mask_filename = os.path.join(self.base_dir, self.data_split, self.args.scene, 'mask',
                                          OBJECT_MASK_VISIBLE_DIR, str(frame_id) + '.png')
-            mask = cv2.imread(mask_filename)
+            mask = cv2.imread(mask_filename)[:, :, 0]
+            if self.erosion_kernel is not None:
+                mask = cv2.erode(mask, self.erosion_kernel, iterations=1)
 
             # Extract the masked point cloud
             cloud, colors = self.image_to_world(mask, cut_z=np.linalg.norm(self.anno['objTrans'])*1.1)
@@ -81,7 +88,7 @@ class TrajectoryVisualizer:
         # Visualize
         if self.args.visualize:
             scene_pcds = None
-            self.visualize(cam_poses, mask_pcds, scene_pcds)
+            self.visualize_all(cam_poses, mask_pcds, scene_pcds)
 
     def load_data(self, seq_name, frame_id):
         rgb = read_RGB_img(self.base_dir, seq_name, frame_id, self.data_split)
@@ -112,7 +119,7 @@ class TrajectoryVisualizer:
         colors = []
         for v in range(self.rgb.shape[0]):
             for u in range(self.rgb.shape[1]):
-                if mask is None or mask[v, u][0] > 0:
+                if mask is None or mask[v, u] > 0:
                     z = self.depth[v, u]
                     if z < cut_z:
                         x = (u - cx) * z * i_fx
@@ -143,7 +150,7 @@ class TrajectoryVisualizer:
         return cloud_tfd, cam_pose
 
     @staticmethod
-    def visualize(cam_poses, mask_pcds, scene_pcds=None):
+    def visualize_all(cam_poses, mask_pcds, scene_pcds=None):
         # Create visualizer
         vis = o3d.visualization.Visualizer()
         vis.create_window()
@@ -185,7 +192,8 @@ if __name__ == '__main__':
     args.scene = 'ABF10'
     args.visualize = True
     args.save = False
-    args.max_num = 10
-    args.skip = 100
+    args.max_num = -1
+    args.skip = 50
+    args.mask_erosion_kernel = 8
 
     mask_extractor = TrajectoryVisualizer(args)
