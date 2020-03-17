@@ -59,88 +59,31 @@ class TrajectoryVisualizer:
             obj_trans = self.anno['objTrans']
             cloud, colors = self.image_to_world(mask, cut_z=np.linalg.norm(obj_trans)*1.1)
             mask_pcd = o3d.geometry.PointCloud()
-            # cloud = np.append(cloud, [[0., 0., 0.], [1., 0., 0.], [0., 1., 0.], [0., 0., 1.]], axis=0)
             mask_pcd.points = o3d.utility.Vector3dVector(cloud)
             mask_pcd.colors = o3d.utility.Vector3dVector(colors)
             # mask_pcd.transform([[1, 0, 0, 0], [0, -1, 0, 0], [0, 0, -1, 0], [0, 0, 0, 1]])
-            mask_pcd_copy = copy.deepcopy(mask_pcd)
-            pts = np.asarray(mask_pcd_copy.points)
-            pts = np.append(pts, [[0., 0., 0.], [1., 0., 0.], [0., 1., 0.], [0., 0., 1.]], axis=0)
-            mask_pcd_copy.points = o3d.utility.Vector3dVector(pts)
-            mask_pcd_copy.paint_uniform_color([0.4, 0.4, 0.9])
 
-            '''
+            coord_change_mat = np.array([[1., 0., 0.], [0, -1., 0.], [0., 0., -1.]], dtype=np.float32)
+            obj_trans = obj_trans.dot(coord_change_mat.T)
+            obj_rot = obj_rot.flatten().dot(coord_change_mat.T).reshape(self.anno['objRot'].shape)
+            rot_max = cv2.Rodrigues(obj_rot)[0].T
+
             pts = np.asarray(mask_pcd.points)
             pts -= obj_trans
-            pts = np.matmul(pts, np.linalg.inv(cv2.Rodrigues(obj_rot)[0].T))
-            # mask_pcd.points = o3d.utility.Vector3dVector(pts[:-4, :])
+            pts = np.matmul(pts, np.linalg.inv(rot_max))
             mask_pcd.points = o3d.utility.Vector3dVector(pts)
-            if count == 0:
-                mask_pcd.paint_uniform_color([0.9, 0.4, 0.4])
-            else:
-                mask_pcd.paint_uniform_color([0.4, 0.9, 0.4])
-            '''
-            obj_rot[1] *= -1
-            obj_rot[2] *= -1
-            obj_trans[1] *= -1
-            obj_trans[2] *= -1
-            pts = np.asarray(mask_pcd.points)
-            pts = np.append(pts, [[0., 0., 0.], [1., 0., 0.], [0., 1., 0.], [0., 0., 1.]], axis=0)
-            pts -= obj_trans
-            pts = np.matmul(pts, np.linalg.inv(cv2.Rodrigues(obj_rot)[0].T))
-            # mask_pcd.points = o3d.utility.Vector3dVector(pts[:-4, :])
-            mask_pcd.points = o3d.utility.Vector3dVector(pts)
-            if count == 0:
-                mask_pcd.paint_uniform_color([0.9, 0.4, 0.4])
-            else:
-                mask_pcd.paint_uniform_color([0.4, 0.9, 0.4])
 
             cam_pose = np.eye(4)
-            cam_pose[:3, 3] = pts[-4, :]
-            cam_pose[:3, 0] = pts[-3, :]
-            cam_pose[:3, 1] = pts[-2, :]
-            cam_pose[:3, 2] = pts[-1, :]
-            print('Camera pose from points\n{}'.format(cam_pose))
-            print(np.linalg.norm(cam_pose[:3, 0]), np.linalg.norm(cam_pose[:3, 1]), np.linalg.norm(cam_pose[:3, 2]))
-
-            cam_pose[:3, 0] = cam_pose[:3, 0] - cam_pose[:3, 3]
-            cam_pose[:3, 0] /= np.linalg.norm(cam_pose[:3, 0])
-            cam_pose[:3, 1] = cam_pose[:3, 1] - cam_pose[:3, 3]
-            cam_pose[:3, 1] /= np.linalg.norm(cam_pose[:3, 1])
-            cam_pose[:3, 2] = cam_pose[:3, 2] - cam_pose[:3, 3]
-            cam_pose[:3, 2] /= np.linalg.norm(cam_pose[:3, 2])
-            print('Camera pose from points after adjustment with center and normalizing\n{}'.format(cam_pose))
-            print(np.linalg.norm(cam_pose[:3, 0]), np.linalg.norm(cam_pose[:3, 1]), np.linalg.norm(cam_pose[:3, 2]))
-
-            #cam_pose = np.eye(4)
-            #cam_pose[:3, 3] = -obj_trans
-
-            '''
-            print('Object translation {}'.format(obj_trans))
-            print('Object rotation {}'.format(obj_rot))
-            rot_max = cv2.Rodrigues(obj_rot)[0]
-            # print('Object rotation max\n{}'.format(rot_max))
-            print('Object rotation max.T\n{}'.format(rot_max.T))
-            # print('Object rotation inv(max.T)\n{}'.format(np.linalg.inv(rot_max.T)))
-
-            pts = np.matmul(-obj_trans, np.linalg.inv(cv2.Rodrigues(obj_rot)[0].T))
-            print(pts)
-            '''
-
-            cam_pose = np.eye(4)
-            cam_pose[:3, :3] = cv2.Rodrigues(obj_rot)[0].T
-            cam_pose[:3, 3] = np.matmul(-obj_trans, np.linalg.inv(cv2.Rodrigues(obj_rot)[0].T))
-            print('Camera pose simple\n{}'.format(cam_pose))
-            print(np.linalg.norm(cam_pose[:3, 0]), np.linalg.norm(cam_pose[:3, 1]), np.linalg.norm(cam_pose[:3, 2]))
+            cam_pose[:3, :3] = rot_max
+            cam_pose[:3, 3] = np.matmul(-obj_trans, np.linalg.inv(rot_max))
+            print(cam_pose)
 
             # Visualize
             # self.visualize([cam_pose], [mask_pcd], [scene_pcd])
             # sys.exit(0)
 
             cam_poses.append(cam_pose)
-            cam_poses.append(np.eye(4))
             mask_pcds.append(mask_pcd)
-            mask_pcds.append(mask_pcd_copy)
             scene_pcds.append(scene_pcd)
 
             break
@@ -149,7 +92,7 @@ class TrajectoryVisualizer:
                 break
 
         # Visualize
-        scene_pcds = None
+        # scene_pcds = None
         self.visualize(cam_poses, mask_pcds, scene_pcds)
 
     def load_data(self, seq_name, frame_id):
@@ -215,24 +158,9 @@ class TrajectoryVisualizer:
         # Plot camera pose
         for m in cam_poses:
             points = m[:3, :].T
-
-            #print(np.linalg.norm(points[0, :]))
-            #print(np.linalg.norm(points[1, :]))
-            #print(np.linalg.norm(points[2, :]))
-
-            points[0, :] += points[3, :]
+            points[0, :] += points[3, :]  # TODO tile this
             points[1, :] += points[3, :]
             points[2, :] += points[3, :]
-
-            #points[0, :] /= np.linalg.norm(points[0, :])
-            #points[1, :] /= np.linalg.norm(points[1, :])
-            #points[2, :] /= np.linalg.norm(points[2, :])
-
-            print(points)
-            #print(np.linalg.norm(points[0, :]))
-            #print(np.linalg.norm(points[1, :]))
-            #print(np.linalg.norm(points[2, :]))
-
             lines = [[3, 0], [3, 1], [3, 2]]
             line_colors = [[1., 0., 0.], [0., 1., 0.], [0., 0., 1.]]
             line_set = o3d.geometry.LineSet()
