@@ -72,6 +72,9 @@ class TrajectoryVisualizer:
             mask_pcd.colors = o3d.utility.Vector3dVector(colors)
             # mask_pcd.transform([[1, 0, 0, 0], [0, -1, 0, 0], [0, 0, -1, 0], [0, 0, 0, 1]])
 
+            # Remove outliers
+            mask_pcd = self.remove_outliers(mask_pcd)
+
             # Add to lists
             cam_poses.append(cam_pose)
             mask_pcds.append(mask_pcd)
@@ -88,7 +91,7 @@ class TrajectoryVisualizer:
         # Visualize
         if self.args.visualize:
             scene_pcds = None
-            self.visualize_all(cam_poses, mask_pcds, scene_pcds)
+            self.visualize(cam_poses, mask_pcds, scene_pcds)
 
     def load_data(self, seq_name, frame_id):
         rgb = read_RGB_img(self.base_dir, seq_name, frame_id, self.data_split)
@@ -149,8 +152,18 @@ class TrajectoryVisualizer:
 
         return cloud_tfd, cam_pose
 
+    def remove_outliers(self, cloud):
+        if self.args.outlier_rm_nb_neighbors > 0 and self.args.outlier_rm_std_ratio > 0:
+            _, ind = o3d.geometry.statistical_outlier_removal(cloud,
+                                                              nb_neighbors=self.args.outlier_rm_nb_neighbors,
+                                                              std_ratio=self.args.outlier_rm_std_ratio)
+            in_cloud = o3d.geometry.select_down_sample(cloud, ind)
+            return in_cloud
+        else:
+            return cloud
+
     @staticmethod
-    def visualize_all(cam_poses, mask_pcds, scene_pcds=None):
+    def visualize(cam_poses, mask_pcds, scene_pcds=None):
         # Create visualizer
         vis = o3d.visualization.Visualizer()
         vis.create_window()
@@ -185,7 +198,7 @@ class TrajectoryVisualizer:
 
 
 if __name__ == '__main__':
-    # parse the arguments
+    # Parse the arguments
     parser = argparse.ArgumentParser(description='HANDS19 - Task#3 HO-3D Camera trajectory visualization')
     args = parser.parse_args()
     args.ho3d_path = '/home/tpatten/v4rtemp/datasets/HandTracking/HO3D_v2/'
@@ -193,7 +206,10 @@ if __name__ == '__main__':
     args.visualize = True
     args.save = False
     args.max_num = -1
-    args.skip = 50
-    args.mask_erosion_kernel = 8
+    args.skip = 100
+    args.mask_erosion_kernel = 5
+    args.outlier_rm_nb_neighbors = 500
+    args.outlier_rm_std_ratio = 0.001
 
+    # Visualize the trajectory
     mask_extractor = TrajectoryVisualizer(args)

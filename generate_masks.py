@@ -20,7 +20,7 @@ OBJECT_MASK_DIR = 'object'
 HAND_MASK_VISIBLE_DIR = 'hand_vis'
 OBJECT_MASK_VISIBLE_DIR = 'object_vis'
 
-BLACKLIST = ['ABF10', 'ABF11', 'ABF12']
+BLACKLIST = ['ABF10', 'ABF11', 'ABF12', 'ABF13', 'ABF14']
 
 
 class MaskExtractor:
@@ -101,6 +101,8 @@ class MaskExtractor:
                     print('saving...')
                     self.save_masks(mask_dir, frame_id, [hand_mask, object_mask],
                                     [hand_mask_visible, object_mask_visible])
+
+                print('')
 
                 # sys.exit(0)
             # sys.exit(0)
