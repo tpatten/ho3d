@@ -95,19 +95,24 @@ class TrajectoryVisualizer:
             else:
                 mask_pcd.paint_uniform_color([0.4, 0.9, 0.4])
 
-            '''
-            print(pts[-4:, :])
             cam_pose = np.eye(4)
             cam_pose[:3, 3] = pts[-4, :]
             cam_pose[:3, 0] = pts[-3, :]
             cam_pose[:3, 1] = pts[-2, :]
             cam_pose[:3, 2] = pts[-1, :]
-            '''
+            print(cam_pose)
+
+            cam_pose[:3, 0] = cam_pose[:3, 0] - cam_pose[:3, 3]
+            cam_pose[:3, 0] /= np.linalg.norm(cam_pose[:3, 0])
+            cam_pose[:3, 1] = cam_pose[:3, 1] - cam_pose[:3, 3]
+            cam_pose[:3, 1] /= np.linalg.norm(cam_pose[:3, 1])
+            cam_pose[:3, 2] = cam_pose[:3, 2] - cam_pose[:3, 3]
+            cam_pose[:3, 2] /= np.linalg.norm(cam_pose[:3, 2])
 
             #cam_pose = np.eye(4)
             #cam_pose[:3, 3] = -obj_trans
 
-            #'''
+            '''
             cam_cloud = o3d.geometry.PointCloud()
             cam_cloud.points = o3d.utility.Vector3dVector([[0, 0, 0], [1, 0, 0], [0, 1, 0], [0, 0, 1]])
             # cam_cloud.transform([[1, 0, 0, 0], [0, -1, 0, 0], [0, 0, -1, 0], [0, 0, 0, 1]])
@@ -119,13 +124,14 @@ class TrajectoryVisualizer:
             cam_pose[:3, 0] = pts[1]
             cam_pose[:3, 1] = pts[2]
             cam_pose[:3, 2] = pts[3]
-            #'''
+            '''
 
             # Visualize
             # self.visualize([cam_pose], [mask_pcd], [scene_pcd])
             # sys.exit(0)
 
             cam_poses.append(cam_pose)
+            cam_poses.append(np.eye(4))
             mask_pcds.append(mask_pcd)
             mask_pcds.append(mask_pcd_copy)
             scene_pcds.append(scene_pcd)
@@ -188,7 +194,7 @@ class TrajectoryVisualizer:
         vis.create_window()
 
         # Plot the coordinate frame
-        # vis.add_geometry(o3d.create_mesh_coordinate_frame(size=0.5))
+        vis.add_geometry(o3d.create_mesh_coordinate_frame(size=0.5))
 
         # Plot the object cloud
         for m in mask_pcds:
@@ -203,9 +209,9 @@ class TrajectoryVisualizer:
         # Plot camera pose
         for c in cam_poses:
             points = c[:3, :].T
-            points[0, :] += points[3, :]
-            points[1, :] += points[3, :]
-            points[2, :] += points[3, :]
+            #points[0, :] += points[3, :]
+            #points[1, :] += points[3, :]
+            #points[2, :] += points[3, :]
             lines = [[3, 0], [3, 1], [3, 2]]
             line_colors = [[1., 0., 0.], [0., 1., 0.], [0., 0., 1.]]
             line_set = o3d.geometry.LineSet()
@@ -214,6 +220,154 @@ class TrajectoryVisualizer:
             line_set.colors = o3d.utility.Vector3dVector(line_colors)
             vis.add_geometry(line_set)
         '''
+
+        '''
+        radius = 0.05
+        count = 0
+        for m in mask_pcds:
+            if count == 0:
+                colr = [1., 0., 0.]
+            else:
+                colr = [0., 0., 1.]
+            mm = o3d.create_mesh_sphere(radius=radius)
+            mm.compute_vertex_normals()
+            mm.paint_uniform_color([0, 0, 0])
+            trans3d = np.asarray(m.points)[-4, :]
+            tt = np.eye(4)
+            tt[0:3, 3] = trans3d
+            mm.transform(tt)
+            vis.add_geometry(mm)
+            print(trans3d)
+
+            mm = o3d.create_mesh_sphere(radius=radius)
+            mm.compute_vertex_normals()
+            mm.paint_uniform_color([1, 0, 0])
+            trans3d = np.asarray(m.points)[-3, :]
+            tt = np.eye(4)
+            tt[0:3, 3] = trans3d
+            mm.transform(tt)
+            vis.add_geometry(mm)
+            print(trans3d)
+
+            mm = o3d.create_mesh_sphere(radius=radius)
+            mm.compute_vertex_normals()
+            mm.paint_uniform_color([0, 1, 0])
+            trans3d = np.asarray(m.points)[-2, :]
+            tt = np.eye(4)
+            tt[0:3, 3] = trans3d
+            mm.transform(tt)
+            vis.add_geometry(mm)
+            print(trans3d)
+
+            mm = o3d.create_mesh_sphere(radius=radius)
+            mm.compute_vertex_normals()
+            mm.paint_uniform_color([0, 0, 1])
+            trans3d = np.asarray(m.points)[-1, :]
+            tt = np.eye(4)
+            tt[0:3, 3] = trans3d
+            mm.transform(tt)
+            vis.add_geometry(mm)
+            print(trans3d)
+
+            count += 1
+
+            points = np.asarray(m.points)[-4:, :]
+            print(points)
+            #points[0, :] += points[0, :]
+            #points[1, :] += points[0, :]
+            #points[2, :] += points[0, :]
+            #print(points)
+            # lines = [[3, 0], [3, 1], [3, 2]]
+            lines = [[0, 1], [0, 2], [0, 3]]
+            line_colors = [[1., 0., 0.], [0., 1., 0.], [0., 0., 1.]]
+            line_set = o3d.geometry.LineSet()
+            line_set.points = o3d.utility.Vector3dVector(points)
+            line_set.lines = o3d.utility.Vector2iVector(lines)
+            line_set.colors = o3d.utility.Vector3dVector(line_colors)
+            vis.add_geometry(line_set)
+
+        count = 0
+        for m in cam_poses:
+            if count == 0:
+                colr = [1., 0., 0.]
+            else:
+                colr = [0., 0., 1.]
+            mm = o3d.create_mesh_sphere(radius=radius)
+            mm.compute_vertex_normals()
+            mm.paint_uniform_color(colr)
+            tt = np.eye(4)
+            tt[0:3, 3] = m[:3, 0]
+            mm.transform(tt)
+            vis.add_geometry(mm)
+
+            mm = o3d.create_mesh_sphere(radius=radius)
+            mm.compute_vertex_normals()
+            mm.paint_uniform_color(colr)
+            tt = np.eye(4)
+            tt[0:3, 3] = m[:3, 1]
+            mm.transform(tt)
+            vis.add_geometry(mm)
+
+            mm = o3d.create_mesh_sphere(radius=radius)
+            mm.compute_vertex_normals()
+            mm.paint_uniform_color(colr)
+            tt = np.eye(4)
+            tt[0:3, 3] = m[:3, 2]
+            mm.transform(tt)
+            vis.add_geometry(mm)
+
+            mm = o3d.create_mesh_sphere(radius=radius)
+            mm.compute_vertex_normals()
+            mm.paint_uniform_color(colr)
+            tt = np.eye(4)
+            tt[0:3, 3] = m[:3, 3]
+            mm.transform(tt)
+            vis.add_geometry(mm)
+
+            count += 1
+
+            points = [m[:3, 3], m[:3, 0], m[:3, 1], m[:3, 2]]
+            # points[0, :] += points[0, :]
+            # points[1, :] += points[0, :]
+            # points[2, :] += points[0, :]
+            # print(points)
+            # lines = [[3, 0], [3, 1], [3, 2]]
+            lines = [[0, 1], [0, 2], [0, 3]]
+            line_colors = [[1., 0., 0.], [0., 1., 0.], [0., 0., 1.]]
+            line_set = o3d.geometry.LineSet()
+            line_set.points = o3d.utility.Vector3dVector(points)
+            line_set.lines = o3d.utility.Vector2iVector(lines)
+            line_set.colors = o3d.utility.Vector3dVector(line_colors)
+            vis.add_geometry(line_set)
+        '''
+
+        for m in cam_poses:
+            points = m[:3, :].T
+
+            #print(np.linalg.norm(points[0, :]))
+            #print(np.linalg.norm(points[1, :]))
+            #print(np.linalg.norm(points[2, :]))
+
+            points[0, :] += points[3, :]
+            points[1, :] += points[3, :]
+            points[2, :] += points[3, :]
+
+            #points[0, :] /= np.linalg.norm(points[0, :])
+            #points[1, :] /= np.linalg.norm(points[1, :])
+            #points[2, :] /= np.linalg.norm(points[2, :])
+
+            print(points)
+            #print(np.linalg.norm(points[0, :]))
+            #print(np.linalg.norm(points[1, :]))
+            #print(np.linalg.norm(points[2, :]))
+
+            lines = [[3, 0], [3, 1], [3, 2]]
+            line_colors = [[1., 0., 0.], [0., 1., 0.], [0., 0., 1.]]
+            line_set = o3d.geometry.LineSet()
+            line_set.points = o3d.utility.Vector3dVector(points)
+            line_set.lines = o3d.utility.Vector2iVector(lines)
+            line_set.colors = o3d.utility.Vector3dVector(line_colors)
+            vis.add_geometry(line_set)
 
         vis.run()
         vis.destroy_window()
@@ -225,7 +379,7 @@ if __name__ == '__main__':
     args = parser.parse_args()
     args.ho3d_path = '/home/tpatten/v4rtemp/datasets/HandTracking/HO3D_v2/'
     args.scene = 'ABF10'
-    args.visualize = False
-    args.save = True
+    args.visualize = True
+    args.save = False
 
     mask_extractor = TrajectoryVisualizer(args)
