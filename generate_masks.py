@@ -20,6 +20,8 @@ OBJECT_MASK_DIR = 'object'
 HAND_MASK_VISIBLE_DIR = 'hand_vis'
 OBJECT_MASK_VISIBLE_DIR = 'object_vis'
 
+BLACKLIST = ['ABF10', 'ABF11', 'ABF12']
+
 
 class MaskExtractor:
     def __init__(self, args):
@@ -39,6 +41,11 @@ class MaskExtractor:
 
         # For each directory in the split
         for d in dirs:
+            # Don't process directories that are black listed
+            if self.directory_in_blacklist(d):
+                print('{} is black listed, skipping'.format(d))
+                continue
+
             # Create the directories to save mask data
             mask_dir = os.path.join(self.base_dir, self.data_split, d, 'mask')
             self.create_directories(mask_dir)
@@ -57,41 +64,55 @@ class MaskExtractor:
                 save_filename = os.path.join(mask_dir, HAND_MASK_DIR, str(frame_id) + '.png')
                 if self.args.save and os.path.exists(save_filename):
                     print('Already exists, skipping')
-                else:
-                    # Read image, depths maps and annotations
-                    self.rgb, self.depth, self.anno = self.load_data(d, frame_id)
+                    continue
 
-                    # Get hand and object meshes
-                    #_, hand_mesh = forwardKinematics(self.anno['handPose'], self.anno['handTrans'], self.anno['handBeta'])
-                    hand_mesh = self.get_hand_mesh()
-                    object_mesh = self.get_object_mesh()
+                print('=====>')
+                # Read image, depths maps and annotations
+                self.rgb, self.depth, self.anno, self.scene_kd_tree = self.load_data(d, frame_id)
 
-                    # Get hand and object masks
-                    hand_mask, object_mask = self.get_masks([hand_mesh.r, hand_mesh.f], [object_mesh.v, object_mesh.f],
-                                                            apply_close=MORPH_CLOSE)
+                # Get hand and object meshes
+                print('getting meshes...')
+                #_, hand_mesh = forwardKinematics(self.anno['handPose'], self.anno['handTrans'], self.anno['handBeta'])
+                hand_mesh = self.get_hand_mesh()
+                object_mesh = self.get_object_mesh()
 
-                    # Get visible masks
-                    scene_cloud_filename = os.path.join(
-                        self.base_dir, self.data_split, d, 'meta', 'cloud_' + str(frame_id) + '.ply')
-                    scene_pcd = o3d.io.read_point_cloud(scene_cloud_filename)
-                    self.scene_kd_tree = o3d.geometry.KDTreeFlann(scene_pcd)
-                    hand_mask_visible = self.get_visible_mask([hand_mesh.r, hand_mesh.f], apply_close=MORPH_CLOSE)
-                    object_mask_visible = self.subtract_mask(object_mask, hand_mask_visible)
-                    kernel = np.ones((7, 7), np.uint8)
-                    object_mask_visible = cv2.erode(object_mask_visible, kernel, iterations=1)
+                # Get hand and object masks
+                hand_mask, object_mask = self.get_masks([hand_mesh.r, hand_mesh.f], [object_mesh.v, object_mesh.f],
+                                                        apply_close=MORPH_CLOSE)
 
-                    # Visualize
-                    labels = [HAND_LABEL, OBJECT_LABEL]
-                    if self.args.visualize:
-                        self.visualize([hand_mask, object_mask], [hand_mask_visible, object_mask_visible], labels)
+                # Get visible masks
+                print('getting masks...')
+                # scene_cloud_filename = os.path.join(
+                #     self.base_dir, self.data_split, d, 'meta', 'cloud_' + str(frame_id) + '.ply')
+                # scene_pcd = o3d.io.read_point_cloud(scene_cloud_filename)
+                # self.scene_kd_tree = o3d.geometry.KDTreeFlann(scene_pcd)
+                hand_mask_visible = self.get_visible_mask([hand_mesh.r, hand_mesh.f], apply_close=MORPH_CLOSE)
+                object_mask_visible = self.subtract_mask(object_mask, hand_mask_visible)
+                kernel = np.ones((7, 7), np.uint8)
+                object_mask_visible = cv2.erode(object_mask_visible, kernel, iterations=1)
 
-                    # Save
-                    if self.args.save:
-                        self.save_masks(mask_dir, frame_id, [hand_mask, object_mask],
-                                        [hand_mask_visible, object_mask_visible])
+                # Visualize
+                labels = [HAND_LABEL, OBJECT_LABEL]
+                if self.args.visualize:
+                    self.visualize([hand_mask, object_mask], [hand_mask_visible, object_mask_visible], labels)
+
+                # Save
+                if self.args.save:
+                    print('saving...')
+                    self.save_masks(mask_dir, frame_id, [hand_mask, object_mask],
+                                    [hand_mask_visible, object_mask_visible])
 
                 # sys.exit(0)
             # sys.exit(0)
+
+    @staticmethod
+    def directory_in_blacklist(dir_name):
+        if len(BLACKLIST) == 0:
+            return False
+        for b in BLACKLIST:
+            if dir_name == b:
+                return True
+        return False
 
     @staticmethod
     def create_directories(mask_dir):
@@ -124,7 +145,22 @@ class MaskExtractor:
         rgb = read_RGB_img(self.base_dir, seq_name, frame_id, self.data_split)
         depth = read_depth_img(self.base_dir, seq_name, frame_id, self.data_split)
         anno = read_annotation(self.base_dir, seq_name, frame_id, self.data_split)
-        return rgb, depth, anno
+
+        # Create a cloud for visualization
+        rgb_o3d = o3d.geometry.Image(rgb.astype(np.uint8))
+        rgb_o3d = o3d.geometry.Image(rgb_o3d)
+        depth_o3d = o3d.geometry.Image(depth.astype(np.float32))
+
+        rgbd_image = o3d.geometry.create_rgbd_image_from_color_and_depth(rgb_o3d, depth_o3d)
+        cam_intrinsics = o3d.camera.PinholeCameraIntrinsic()
+        K = anno['camMat']
+        cam_intrinsics.set_intrinsics(640, 480, K[0, 0], K[1, 1], K[0, 2], K[1, 2])
+        scene_pcd = o3d.geometry.create_point_cloud_from_rgbd_image(rgbd_image, cam_intrinsics)
+        scene_pcd.points = o3d.utility.Vector3dVector(np.asarray(scene_pcd.points) * 1000)
+        scene_pcd.transform([[1, 0, 0, 0], [0, -1, 0, 0], [0, 0, -1, 0], [0, 0, 0, 1]])
+        scene_kd_tree = o3d.geometry.KDTreeFlann(scene_pcd)
+
+        return rgb, depth, anno, scene_kd_tree
 
     def get_hand_mesh(self):
         hand_mesh = copy.deepcopy(self.mano_model)
