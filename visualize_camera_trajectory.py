@@ -100,7 +100,8 @@ class TrajectoryVisualizer:
             cam_pose[:3, 0] = pts[-3, :]
             cam_pose[:3, 1] = pts[-2, :]
             cam_pose[:3, 2] = pts[-1, :]
-            print(cam_pose)
+            print('Camera pose from points\n{}'.format(cam_pose))
+            print(np.linalg.norm(cam_pose[:3, 0]), np.linalg.norm(cam_pose[:3, 1]), np.linalg.norm(cam_pose[:3, 2]))
 
             cam_pose[:3, 0] = cam_pose[:3, 0] - cam_pose[:3, 3]
             cam_pose[:3, 0] /= np.linalg.norm(cam_pose[:3, 0])
@@ -108,23 +109,29 @@ class TrajectoryVisualizer:
             cam_pose[:3, 1] /= np.linalg.norm(cam_pose[:3, 1])
             cam_pose[:3, 2] = cam_pose[:3, 2] - cam_pose[:3, 3]
             cam_pose[:3, 2] /= np.linalg.norm(cam_pose[:3, 2])
+            print('Camera pose from points after adjustment with center and normalizing\n{}'.format(cam_pose))
+            print(np.linalg.norm(cam_pose[:3, 0]), np.linalg.norm(cam_pose[:3, 1]), np.linalg.norm(cam_pose[:3, 2]))
 
             #cam_pose = np.eye(4)
             #cam_pose[:3, 3] = -obj_trans
 
             '''
-            cam_cloud = o3d.geometry.PointCloud()
-            cam_cloud.points = o3d.utility.Vector3dVector([[0, 0, 0], [1, 0, 0], [0, 1, 0], [0, 0, 1]])
-            # cam_cloud.transform([[1, 0, 0, 0], [0, -1, 0, 0], [0, 0, -1, 0], [0, 0, 0, 1]])
-            pts = np.asarray(cam_cloud.points)
-            pts -= obj_trans
-            pts = np.matmul(pts, np.linalg.inv(cv2.Rodrigues(obj_rot)[0].T))
-            cam_pose = np.eye(4)
-            cam_pose[:3, 3] = pts[0]
-            cam_pose[:3, 0] = pts[1]
-            cam_pose[:3, 1] = pts[2]
-            cam_pose[:3, 2] = pts[3]
+            print('Object translation {}'.format(obj_trans))
+            print('Object rotation {}'.format(obj_rot))
+            rot_max = cv2.Rodrigues(obj_rot)[0]
+            # print('Object rotation max\n{}'.format(rot_max))
+            print('Object rotation max.T\n{}'.format(rot_max.T))
+            # print('Object rotation inv(max.T)\n{}'.format(np.linalg.inv(rot_max.T)))
+
+            pts = np.matmul(-obj_trans, np.linalg.inv(cv2.Rodrigues(obj_rot)[0].T))
+            print(pts)
             '''
+
+            cam_pose = np.eye(4)
+            cam_pose[:3, :3] = cv2.Rodrigues(obj_rot)[0].T
+            cam_pose[:3, 3] = np.matmul(-obj_trans, np.linalg.inv(cv2.Rodrigues(obj_rot)[0].T))
+            print('Camera pose simple\n{}'.format(cam_pose))
+            print(np.linalg.norm(cam_pose[:3, 0]), np.linalg.norm(cam_pose[:3, 1]), np.linalg.norm(cam_pose[:3, 2]))
 
             # Visualize
             # self.visualize([cam_pose], [mask_pcd], [scene_pcd])
@@ -205,142 +212,7 @@ class TrajectoryVisualizer:
             for s in scene_pcds:
                 vis.add_geometry(s)
 
-        '''
         # Plot camera pose
-        for c in cam_poses:
-            points = c[:3, :].T
-            #points[0, :] += points[3, :]
-            #points[1, :] += points[3, :]
-            #points[2, :] += points[3, :]
-            lines = [[3, 0], [3, 1], [3, 2]]
-            line_colors = [[1., 0., 0.], [0., 1., 0.], [0., 0., 1.]]
-            line_set = o3d.geometry.LineSet()
-            line_set.points = o3d.utility.Vector3dVector(0.3 * points)
-            line_set.lines = o3d.utility.Vector2iVector(lines)
-            line_set.colors = o3d.utility.Vector3dVector(line_colors)
-            vis.add_geometry(line_set)
-        '''
-
-        '''
-        radius = 0.05
-        count = 0
-        for m in mask_pcds:
-            if count == 0:
-                colr = [1., 0., 0.]
-            else:
-                colr = [0., 0., 1.]
-            mm = o3d.create_mesh_sphere(radius=radius)
-            mm.compute_vertex_normals()
-            mm.paint_uniform_color([0, 0, 0])
-            trans3d = np.asarray(m.points)[-4, :]
-            tt = np.eye(4)
-            tt[0:3, 3] = trans3d
-            mm.transform(tt)
-            vis.add_geometry(mm)
-            print(trans3d)
-
-            mm = o3d.create_mesh_sphere(radius=radius)
-            mm.compute_vertex_normals()
-            mm.paint_uniform_color([1, 0, 0])
-            trans3d = np.asarray(m.points)[-3, :]
-            tt = np.eye(4)
-            tt[0:3, 3] = trans3d
-            mm.transform(tt)
-            vis.add_geometry(mm)
-            print(trans3d)
-
-            mm = o3d.create_mesh_sphere(radius=radius)
-            mm.compute_vertex_normals()
-            mm.paint_uniform_color([0, 1, 0])
-            trans3d = np.asarray(m.points)[-2, :]
-            tt = np.eye(4)
-            tt[0:3, 3] = trans3d
-            mm.transform(tt)
-            vis.add_geometry(mm)
-            print(trans3d)
-
-            mm = o3d.create_mesh_sphere(radius=radius)
-            mm.compute_vertex_normals()
-            mm.paint_uniform_color([0, 0, 1])
-            trans3d = np.asarray(m.points)[-1, :]
-            tt = np.eye(4)
-            tt[0:3, 3] = trans3d
-            mm.transform(tt)
-            vis.add_geometry(mm)
-            print(trans3d)
-
-            count += 1
-
-            points = np.asarray(m.points)[-4:, :]
-            print(points)
-            #points[0, :] += points[0, :]
-            #points[1, :] += points[0, :]
-            #points[2, :] += points[0, :]
-            #print(points)
-            # lines = [[3, 0], [3, 1], [3, 2]]
-            lines = [[0, 1], [0, 2], [0, 3]]
-            line_colors = [[1., 0., 0.], [0., 1., 0.], [0., 0., 1.]]
-            line_set = o3d.geometry.LineSet()
-            line_set.points = o3d.utility.Vector3dVector(points)
-            line_set.lines = o3d.utility.Vector2iVector(lines)
-            line_set.colors = o3d.utility.Vector3dVector(line_colors)
-            vis.add_geometry(line_set)
-
-        count = 0
-        for m in cam_poses:
-            if count == 0:
-                colr = [1., 0., 0.]
-            else:
-                colr = [0., 0., 1.]
-            mm = o3d.create_mesh_sphere(radius=radius)
-            mm.compute_vertex_normals()
-            mm.paint_uniform_color(colr)
-            tt = np.eye(4)
-            tt[0:3, 3] = m[:3, 0]
-            mm.transform(tt)
-            vis.add_geometry(mm)
-
-            mm = o3d.create_mesh_sphere(radius=radius)
-            mm.compute_vertex_normals()
-            mm.paint_uniform_color(colr)
-            tt = np.eye(4)
-            tt[0:3, 3] = m[:3, 1]
-            mm.transform(tt)
-            vis.add_geometry(mm)
-
-            mm = o3d.create_mesh_sphere(radius=radius)
-            mm.compute_vertex_normals()
-            mm.paint_uniform_color(colr)
-            tt = np.eye(4)
-            tt[0:3, 3] = m[:3, 2]
-            mm.transform(tt)
-            vis.add_geometry(mm)
-
-            mm = o3d.create_mesh_sphere(radius=radius)
-            mm.compute_vertex_normals()
-            mm.paint_uniform_color(colr)
-            tt = np.eye(4)
-            tt[0:3, 3] = m[:3, 3]
-            mm.transform(tt)
-            vis.add_geometry(mm)
-
-            count += 1
-
-            points = [m[:3, 3], m[:3, 0], m[:3, 1], m[:3, 2]]
-            # points[0, :] += points[0, :]
-            # points[1, :] += points[0, :]
-            # points[2, :] += points[0, :]
-            # print(points)
-            # lines = [[3, 0], [3, 1], [3, 2]]
-            lines = [[0, 1], [0, 2], [0, 3]]
-            line_colors = [[1., 0., 0.], [0., 1., 0.], [0., 0., 1.]]
-            line_set = o3d.geometry.LineSet()
-            line_set.points = o3d.utility.Vector3dVector(points)
-            line_set.lines = o3d.utility.Vector2iVector(lines)
-            line_set.colors = o3d.utility.Vector3dVector(line_colors)
-            vis.add_geometry(line_set)
-        '''
-
         for m in cam_poses:
             points = m[:3, :].T
 
