@@ -41,6 +41,7 @@ class TrajectoryVisualizer:
         cam_poses = []
         mask_pcds = []
         scene_pcds = []
+        processed_frames = []
         counter = 0
         num_processed = 0
         while counter < len(frame_ids):
@@ -79,6 +80,7 @@ class TrajectoryVisualizer:
             cam_poses.append(cam_pose)
             mask_pcds.append(mask_pcd)
             scene_pcds.append(scene_pcd)
+            processed_frames.append(frame_id)
 
             # Increment counters
             counter += self.args.skip
@@ -87,6 +89,11 @@ class TrajectoryVisualizer:
             # Exit if reached the limit
             if self.args.max_num > 0 and num_processed == self.args.max_num:
                 break
+
+        # Save
+        if self.args.save:
+            base_dir = os.path.join(self.base_dir, self.data_split, self.args.scene)
+            self.save_clouds_and_camera_poses(base_dir, processed_frames, cam_poses, mask_pcds)
 
         # Visualize
         if self.args.visualize:
@@ -196,6 +203,43 @@ class TrajectoryVisualizer:
         vis.run()
         vis.destroy_window()
 
+    @staticmethod
+    def save_clouds_and_camera_poses(base_dir, frame_ids, cam_poses, mask_pcds):
+        all_points = np.asarray(mask_pcds[0].points)
+        all_colors = np.asarray(mask_pcds[0].colors)
+        for i in range(1, len(mask_pcds)):
+            all_points = np.vstack((all_points, np.asarray(mask_pcds[i].points)))
+            all_colors = np.vstack((all_colors, np.asarray(mask_pcds[i].colors)))
+
+        combined_pcd = o3d.geometry.PointCloud()
+        combined_pcd.points = o3d.utility.Vector3dVector(all_points)
+        combined_pcd.colors = o3d.utility.Vector3dVector(all_colors)
+
+        down_pcd = o3d.geometry.voxel_down_sample(combined_pcd, voxel_size=0.001)
+
+        o3d.geometry.estimate_normals(down_pcd,
+                                      search_param=o3d.geometry.KDTreeSearchParamHybrid(
+                                          radius=0.1, max_nn=30))
+
+        points = np.asarray(down_pcd.points)
+        normals = np.asarray(down_pcd.normals)
+        filename = os.path.join(base_dir, 'reconstruction.xyz')
+        f = open(filename, "w")
+        for i in range(len(points)):
+            f.write('{} {} {} {} {} {}\n'.format(points[i, 0], points[i, 1], points[i, 2],
+                                                 normals[i, 0], normals[i, 1], normals[i, 2]))
+        f.close()
+
+
+        '''
+        # Create visualizer
+        vis = o3d.visualization.Visualizer()
+        vis.create_window()
+        vis.add_geometry(down_pcd)
+        vis.run()
+        vis.destroy_window()
+        '''
+
 
 if __name__ == '__main__':
     # Parse the arguments
@@ -204,7 +248,7 @@ if __name__ == '__main__':
     args.ho3d_path = '/home/tpatten/v4rtemp/datasets/HandTracking/HO3D_v2/'
     args.scene = 'ABF10'
     args.visualize = True
-    args.save = False
+    args.save = True
     args.max_num = -1
     args.skip = 100
     args.mask_erosion_kernel = 5
