@@ -174,8 +174,8 @@ if __name__ == '__main__':
     args.ho3d_path = '/home/tpatten/v4rtemp/datasets/HandTracking/HO3D_v2/'
     args.models_path = '/home/tpatten/v4rtemp/datasets/HandTracking/HO3D_v2/models'
     args.gripper_cloud_path = 'hand_open_new.pcd'
-    args.target = 'GSF10'  # The first in the sequence!!
-    args.source = 'GSF14'
+    args.target = 'MDF10'  # The first in the sequence!!
+    args.source = 'MDF12'
     args.visualize = False
     args.process_grasps = True
 
