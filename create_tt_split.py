@@ -10,14 +10,15 @@ LOO_CODE = 'LOO'
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='HANDS19 - Task#3 HO-3D Robot grasp train/test splits generator')
     args = parser.parse_args()
-    args.ho3d_path = '/home/tpatten/v4rtemp/datasets/HandTracking/HO3D_v2/'
+    # args.ho3d_path = '/home/tpatten/v4rtemp/datasets/HandTracking/HO3D_v2/'
+    args.ho3d_path = '/home/tpatten/Data/Hands/HO3D/'
     args.subject_name = ['ABF', 'BB', 'GPMF', 'GSF', 'MDF', 'ShSu']
     args.save_dir = 'splits_new'
     args.generation_mode = LOO_CODE
     args.balance_sets = True
     args.test_proportion = 0.2
     args.reject_grasp_fails = False
-    args.save = True
+    args.save = False
 
     # Read the lines in the train.txt file
     ho3d_train_file = join(args.ho3d_path, 'train.txt')
@@ -55,7 +56,7 @@ if __name__ == '__main__':
             subject_name = subset[0:counter]
             camera_id = subset[counter:]
             # Add to dictionary
-            if not file_dict.has_key(subject_name):
+            if file_dict.get(subject_name) is None:
                 file_dict[subject_name] = []
             file_dict[subject_name].append((camera_id, frame_id))
 
