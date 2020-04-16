@@ -1,6 +1,9 @@
 import argparse
-from os.path import join
+import sys
+from os.path import join, isdir
+from os import makedirs
 import numpy as np
+import random
 
 
 ALL_CODE = 'ALL'
@@ -18,13 +21,26 @@ if __name__ == '__main__':
     args.balance_sets = True
     args.test_proportion = 0.2
     args.reject_grasp_fails = False
-    args.save = False
+    args.save = True
+
+    random.seed()
 
     # Read the lines in the train.txt file
     ho3d_train_file = join(args.ho3d_path, 'train.txt')
     f = open(ho3d_train_file, "r")
     file_list = [line[:-1] for line in f]
     f.close()
+
+    # Create the directory to save the data
+    if args.save:
+        save_dir = join(args.ho3d_path, args.save_dir)
+        if isdir(save_dir):
+            print('Save dirirectory {} already exists!'.format(save_dir))
+            sys.exit(0)
+        try:
+            makedirs(save_dir)
+        except OSError:
+            pass
 
     # Check if grasp is successfully annotated for each file
     if args.reject_grasp_fails:
@@ -175,6 +191,8 @@ if __name__ == '__main__':
 
             # Write the splits to file
             if args.save:
+                for _ in range(10):
+                    random.shuffle(train_samples)
                 train_file = join(args.ho3d_path, args.save_dir, 'X' + str(args.subject_name[i]) + '_grasp_train.txt')
                 f = open(train_file, "w")
                 for s in train_samples:
