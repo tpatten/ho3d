@@ -191,8 +191,7 @@ if __name__ == '__main__':
 
             # Write the splits to file
             if args.save:
-                for _ in range(10):
-                    random.shuffle(train_samples)
+                random.shuffle(train_samples)
                 train_file = join(args.ho3d_path, args.save_dir, 'X' + str(args.subject_name[i]) + '_grasp_train.txt')
                 f = open(train_file, "w")
                 for s in train_samples:
