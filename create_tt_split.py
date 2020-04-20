@@ -35,7 +35,7 @@ if __name__ == '__main__':
     if args.save:
         save_dir = join(args.ho3d_path, args.save_dir)
         if isdir(save_dir):
-            print('Save dirirectory {} already exists!'.format(save_dir))
+            print('Save directory {} already exists!'.format(save_dir))
             sys.exit(0)
         try:
             makedirs(save_dir)
@@ -53,6 +53,84 @@ if __name__ == '__main__':
 
     print('Training set contains {} files and {} grasps'.format(len(file_list), len(grasp_success)))
     print('Grasp success is {} from {}'.format(sum(grasp_success), len(grasp_success)))
+
+    # Try to maintain the same split structure
+    if args.generation_mode == LOO_CODE:
+        subject_indices = {}
+        for i in range(len(file_list)):
+            if grasp_success[i]:
+                subset = file_list[i].split('/')[0]
+                # Get the subject from the subject+camera
+                counter = 0
+                for c in subset:
+                    if not c.isalpha():
+                        break
+                    else:
+                        counter += 1
+                subject_name = subset[0:counter]
+                if subject_name in args.subject_name:
+                    # Add to dictionary
+                    if subject_indices.get(subject_name) is None:
+                        subject_indices[subject_name] = []
+                    subject_indices[subject_name].append(i)
+
+        # Get the maximum number of files per subject
+        number_files = [len(subject_indices[i]) for i in args.subject_name]
+        max_files = min(number_files)
+        # Randomly select files
+        for i in range(len(args.subject_name)):
+            if number_files[i] != max_files:
+                keep_indices = np.random.choice(number_files[i], size=(max_files, 1), replace=False).flatten()
+                reduced_samples = []
+                for j in keep_indices:
+                    reduced_samples.append(subject_indices[args.subject_name[i]][j])
+                # Set the subject files to the selected ones
+                subject_indices[args.subject_name[i]] = reduced_samples
+        # Get all indices
+        all_indices = []
+        for s in args.subject_name:
+            all_indices.extend(subject_indices[s])
+        # Sort the indices
+        all_indices.sort()
+
+        print('Files for train and test {}'.format(len(all_indices)))
+
+        # Create the final list of file and save
+        if args.save:
+            for subn in args.subject_name:
+                train_samples = []
+                test_samples = []
+                for i in all_indices:
+                    subset = file_list[i].split('/')[0]
+                    counter = 0
+                    for c in subset:
+                        if not c.isalpha():
+                            break
+                        else:
+                            counter += 1
+                    subject_name = subset[0:counter]
+                    if subject_name == subn:
+                        test_samples.append(file_list[i])
+                    else:
+                        train_samples.append(file_list[i])
+
+                num_files_for_selection = float(len(all_indices))
+                print('Test set {} ({:.2f}) Train set {} ({:.2f})'.format(
+                    len(test_samples), float(len(test_samples)) / num_files_for_selection,
+                    len(train_samples), float(len(train_samples)) / num_files_for_selection))
+
+                train_file = join(args.ho3d_path, args.save_dir, 'X' + str(subn) + '_grasp_train.txt')
+                f = open(train_file, "w")
+                for s in train_samples:
+                    f.write("{}\n".format(s))
+                f.close()
+                test_file = join(args.ho3d_path, args.save_dir, str(subn) + '_grasp_test.txt')
+                f = open(test_file, "w")
+                for s in test_samples:
+                    f.write("{}\n".format(s))
+                f.close()
+
+        sys.exit(0)
 
     # Create a dictionary for the training files
     file_dict = {}
