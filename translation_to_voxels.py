@@ -6,12 +6,14 @@ from utils.grasp_utils import *
 import numpy as np
 import open3d as o3d
 from math import ceil
+import transforms3d as tf3d
 
 SUBJECTS = ['ABF', 'BB', 'GPMF', 'GSF', 'MDF', 'ShSu']
 DIAMETER = 0.232280153674483
 PASSGREEN = lambda x: '\033[92m' + x + '\033[0m'
 FAILRED = lambda x: '\033[91m' + x + '\033[0m'
 SAVE_FILENAME = 'translation_classification_counts.txt'
+SAVE_FILENAME_AUG = 'translation_classification_counts_augmented.txt'
 
 
 class VoxelVisualizer:
@@ -20,6 +22,7 @@ class VoxelVisualizer:
         self.data_split = 'train'
         self.res = args.resolution
         self.axis_symmetry = args.axis_symmetry
+        self.augmentation = args.augmentation
         self.save = args.save
         self.verbose = args.verbose
         self.do_visualize = args.visualize
@@ -110,7 +113,10 @@ class VoxelVisualizer:
 
         # Save
         if self.save:
-            filename = os.path.join(self.base_dir, SAVE_FILENAME)
+            if self.augmentation:
+                filename = os.path.join(self.base_dir, SAVE_FILENAME_AUG)
+            else:
+                filename = os.path.join(self.base_dir, SAVE_FILENAME)
             f = open(filename, "w")
             for c in counts:
                 for s in counts[c]:
@@ -134,12 +140,18 @@ class VoxelVisualizer:
 
     def compute_voxels(self, hand_joints, grasp_position=None):
         offset = np.expand_dims(np.mean(hand_joints, axis=0), 0)
+        hand_joints = hand_joints - offset
+        grasp_position = grasp_position - offset
+
+        if self.augmentation:
+            # print('Before: {}'.format(grasp_position))
+            hand_joints, grasp_position = self.augment_data(hand_joints, grasp_position)
+            # print('After:  {}'.format(grasp_position))
+
         if grasp_position is None:
-            hand_joints = hand_joints - offset
             dist = np.max(np.sqrt(np.sum(hand_joints ** 2, axis=1)), 0)
             lims = np.max(hand_joints, axis=0)
         else:
-            grasp_position = grasp_position - offset
             dist = np.sqrt(np.sum(grasp_position ** 2))
             lims = grasp_position
         lims = lims.reshape(3, 1)
@@ -179,6 +191,37 @@ class VoxelVisualizer:
             print('Axis lims: {:.4f}  {:.4f}  {:.4f}'.format(abs(grid3[0][0]), abs(grid3[0][1]), abs(grid3[0][2])))
 
         return grid3, nearest_voxel
+
+    @staticmethod
+    def augment_data(point_set, target, disable_global=False):
+        # Global rotation
+        rotation_matrix = tf3d.euler.euler2mat(np.random.uniform(-np.pi, np.pi),
+                                               np.random.uniform(-np.pi, np.pi),
+                                               np.random.uniform(-np.pi, np.pi))
+        point_set_augmented = np.copy(point_set)
+        if not disable_global:
+            point_set_augmented = np.matmul(point_set_augmented, rotation_matrix)
+
+        target_augmented = None
+        if target is not None:
+            target_augmented = np.copy(target)
+            # target_augmented = target_augmented.reshape((3, 3))
+            if not disable_global:
+                target_augmented = np.matmul(target_augmented, rotation_matrix)
+
+        # Local rotation and jitter to point set
+        theta_lims = [-0.025 * np.pi, 0.025 * np.pi]
+        jitter_scale = 0.01
+        rotation_matrix = tf3d.euler.euler2mat(np.random.uniform(theta_lims[0], theta_lims[1]),
+                                               np.random.uniform(theta_lims[0], theta_lims[1]),
+                                               np.random.uniform(theta_lims[0], theta_lims[1]))
+        point_set_augmented = np.matmul(point_set_augmented, rotation_matrix)  # random rotation
+        jitter = np.random.normal(0, jitter_scale, size=point_set_augmented.shape)  # random jitter
+        point_set_augmented += jitter
+
+        # target_augmented = target_augmented.reshape((1, 9)).flatten()
+
+        return point_set_augmented, target_augmented
 
     def visualize(self, voxels, hand_joints, grasp_pose=None):
         offset = np.expand_dims(np.mean(hand_joints, axis=0), 0)
@@ -273,6 +316,7 @@ class VoxelAnalyzer:
     def __init__(self, args):
         self.base_dir = args.ho3d_path
         self.res = args.resolution
+        self.augmentation = args.augmentation
 
         counts, grid3, counts_per_grid_cell = self.analyze()
 
@@ -298,7 +342,10 @@ class VoxelAnalyzer:
         counts_per_grid_cell = np.zeros((grid3.shape[0], 1))
 
         # Load the file
-        data_file = os.path.join(self.base_dir, SAVE_FILENAME)
+        if self.augmentation:
+            data_file = os.path.join(self.base_dir, SAVE_FILENAME_AUG)
+        else:
+            data_file = os.path.join(self.base_dir, SAVE_FILENAME)
         f = open(data_file, "r")
         for line in f:
             fname, vx, vy, vz, count_group = line.split(' ')
@@ -327,6 +374,8 @@ class VoxelAnalyzer:
             else:
                 num_empty_cells += 1
         print('Number of empty grid cells: {}'.format(num_empty_cells))
+
+        # Generate real grid
 
         return counts, grid3, counts_per_grid_cell
 
@@ -370,10 +419,11 @@ if __name__ == '__main__':
     # Parse the arguments
     parser = argparse.ArgumentParser(description='HANDS19 - Task#3 HO-3D Translation voxel visualization')
     args = parser.parse_args()
-    # args.ho3d_path = '/home/tpatten/v4rtemp/datasets/HandTracking/HO3D_v2/'
-    args.ho3d_path = '/home/tpatten/'
+    args.ho3d_path = '/home/tpatten/v4rtemp/datasets/HandTracking/HO3D_v2/'
+    # args.ho3d_path = '/home/tpatten/'
     args.gripper_cloud_path = 'hand_open_new.pcd'
     args.resolution = 0.025
+    args.augmentation = True
     args.axis_symmetry = True
     args.visualize = False
     args.save = True
@@ -382,7 +432,7 @@ if __name__ == '__main__':
     # args.hard_limits = []
 
     # Visualize the voxels
-    #voxel_visualizer = VoxelVisualizer(args)
+    voxel_visualizer = VoxelVisualizer(args)
 
     # Analyze the voxels
-    voxel_analyzer = VoxelAnalyzer(args)
+    # voxel_analyzer = VoxelAnalyzer(args)
