@@ -118,6 +118,7 @@ class VoxelVisualizer:
                                         '_R' + str(self.res).replace('.', '-') + '.txt')
             else:
                 filename = os.path.join(self.base_dir, SAVE_FILENAME + '_R' + str(self.res).replace('.', '-') + '.txt')
+            print('Saving to {}'.format(filename))
             f = open(filename, "w")
             for c in counts:
                 for s in counts[c]:
@@ -419,8 +420,8 @@ if __name__ == '__main__':
     args.augmentation = False
     args.axis_symmetry = True
     args.visualize = False
-    args.save = False
-    args.verbose = True
+    args.save = True
+    args.verbose = False
     args.hard_limits = None
     # args.hard_limits = []
 
