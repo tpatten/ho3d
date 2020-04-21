@@ -202,6 +202,7 @@ class VoxelVisualizer:
         rotation_matrix = tf3d.euler.euler2mat(np.random.uniform(-np.pi, np.pi),
                                                np.random.uniform(-np.pi, np.pi),
                                                np.random.uniform(-np.pi, np.pi))
+        print('Rotation matrix\n', rotation_matrix)
         point_set_augmented = np.copy(point_set)
         if not disable_global:
             point_set_augmented = np.matmul(point_set_augmented, rotation_matrix)
@@ -214,6 +215,10 @@ class VoxelVisualizer:
                 target_augmented = np.matmul(target_augmented, rotation_matrix)
 
         # target_augmented = target_augmented.reshape((1, 9)).flatten()
+
+        print('Augmentation')
+        print(np.linalg.norm(point_set - point_set_augmented, axis=1))
+        print(np.linalg.norm(target - target_augmented, axis=1))
 
         return point_set_augmented, target_augmented
 
@@ -358,16 +363,28 @@ class VoxelAnalyzer:
         for c in counts:
             print('{}:\t{}'.format(c, len(counts[c])))
 
+        num_used_cells = 0
         num_empty_cells = 0
-        c = 0
+        lims = np.zeros((2, 3))
         for i in range(grid3.shape[0]):
             if counts_per_grid_cell[i] > 0:
-                #print('{}: {:4f} {:4f} {:4f} -- {}'.format(c, grid3[i][0], grid3[i][0], grid3[i][0],
-                #                                           int(counts_per_grid_cell[i])))
-                c += 1
+                for j in range(3):
+                    if grid3[i][j] > lims[1][j]:
+                        lims[1][j] = grid3[i][j]
+                    elif grid3[i][j] < lims[0][j]:
+                        lims[0][j] = grid3[i][j]
+                # print('{}: {:4f} {:4f} {:4f} -- {}'.format(num_used_cells, grid3[i][0], grid3[i][0], grid3[i][0],
+                #                                            int(counts_per_grid_cell[i])))
+                num_used_cells += 1
             else:
                 num_empty_cells += 1
+        print('Number of used grid cells: {}'.format(num_used_cells))
         print('Number of empty grid cells: {}'.format(num_empty_cells))
+
+        lims = np.ceil(lims / self.res).astype(int)
+        print('Restructured grid {} x {} x {} = {}'.format(
+            lims[1][0] - lims[0][0] + 1, lims[1][1] - lims[0][1] + 1, lims[1][2] - lims[0][2] + 1,
+            (lims[1][0] - lims[0][0] + 1) * (lims[1][1] - lims[0][1] + 1) * (lims[1][2] - lims[0][2] + 1)))
 
         # Generate real grid
 
@@ -413,8 +430,8 @@ if __name__ == '__main__':
     # Parse the arguments
     parser = argparse.ArgumentParser(description='HANDS19 - Task#3 HO-3D Translation voxel visualization')
     args = parser.parse_args()
-    args.ho3d_path = '/home/tpatten/v4rtemp/datasets/HandTracking/HO3D_v2/'
-    # args.ho3d_path = '/home/tpatten/'
+    # args.ho3d_path = '/home/tpatten/v4rtemp/datasets/HandTracking/HO3D_v2/'
+    args.ho3d_path = '/home/tpatten/'
     args.gripper_cloud_path = 'hand_open_new.pcd'
     args.resolution = 0.025
     args.augmentation = False
@@ -426,7 +443,7 @@ if __name__ == '__main__':
     # args.hard_limits = []
 
     # Visualize the voxels
-    voxel_visualizer = VoxelVisualizer(args)
+    # voxel_visualizer = VoxelVisualizer(args)
 
     # Analyze the voxels
-    # voxel_analyzer = VoxelAnalyzer(args)
+    voxel_analyzer = VoxelAnalyzer(args)
