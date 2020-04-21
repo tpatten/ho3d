@@ -12,8 +12,8 @@ SUBJECTS = ['ABF', 'BB', 'GPMF', 'GSF', 'MDF', 'ShSu']
 DIAMETER = 0.232280153674483
 PASSGREEN = lambda x: '\033[92m' + x + '\033[0m'
 FAILRED = lambda x: '\033[91m' + x + '\033[0m'
-SAVE_FILENAME = 'translation_classification_counts.txt'
-SAVE_FILENAME_AUG = 'translation_classification_counts_augmented.txt'
+SAVE_FILENAME = 'translation_classification_counts'
+SAVE_FILENAME_AUG = 'translation_classification_counts_augmented'
 
 
 class VoxelVisualizer:
@@ -114,9 +114,10 @@ class VoxelVisualizer:
         # Save
         if self.save:
             if self.augmentation:
-                filename = os.path.join(self.base_dir, SAVE_FILENAME_AUG)
+                filename = os.path.join(self.base_dir, SAVE_FILENAME_AUG +
+                                        '_R' + str(self.res).replace('.', '-') + '.txt')
             else:
-                filename = os.path.join(self.base_dir, SAVE_FILENAME)
+                filename = os.path.join(self.base_dir, SAVE_FILENAME + '_R' + str(self.res).replace('.', '-') + '.txt')
             f = open(filename, "w")
             for c in counts:
                 for s in counts[c]:
@@ -176,7 +177,8 @@ class VoxelVisualizer:
 
         nearest_voxel = [1000, 1000, 1000]
         if grasp_position is not None:
-            dists = np.linalg.norm(grid3 - (grasp_position - offset), axis=1)
+            # dists = np.linalg.norm(grid3 - (grasp_position - offset), axis=1)
+            dists = np.linalg.norm(grid3 - grasp_position, axis=1)
             min_idx = np.argmin(dists)
             nearest_voxel = grid3[min_idx]
 
@@ -187,6 +189,7 @@ class VoxelVisualizer:
                 dists = np.linalg.norm(grid3 - grasp_position, axis=1)
                 min_idx = np.argmin(dists)
                 print('Min dist {:.0f}mm'.format(dists[min_idx]*1000))
+                print('Vox dist {:.0f}mm'.format(np.linalg.norm(nearest_voxel - grasp_position.flatten()) * 1000))
             print('Num voxels {}'.format(grid3.shape[0]))
             print('Axis lims: {:.4f}  {:.4f}  {:.4f}'.format(abs(grid3[0][0]), abs(grid3[0][1]), abs(grid3[0][2])))
 
@@ -208,16 +211,6 @@ class VoxelVisualizer:
             # target_augmented = target_augmented.reshape((3, 3))
             if not disable_global:
                 target_augmented = np.matmul(target_augmented, rotation_matrix)
-
-        # Local rotation and jitter to point set
-        theta_lims = [-0.025 * np.pi, 0.025 * np.pi]
-        jitter_scale = 0.01
-        rotation_matrix = tf3d.euler.euler2mat(np.random.uniform(theta_lims[0], theta_lims[1]),
-                                               np.random.uniform(theta_lims[0], theta_lims[1]),
-                                               np.random.uniform(theta_lims[0], theta_lims[1]))
-        point_set_augmented = np.matmul(point_set_augmented, rotation_matrix)  # random rotation
-        jitter = np.random.normal(0, jitter_scale, size=point_set_augmented.shape)  # random jitter
-        point_set_augmented += jitter
 
         # target_augmented = target_augmented.reshape((1, 9)).flatten()
 
@@ -343,9 +336,9 @@ class VoxelAnalyzer:
 
         # Load the file
         if self.augmentation:
-            data_file = os.path.join(self.base_dir, SAVE_FILENAME_AUG)
+            data_file = os.path.join(self.base_dir, SAVE_FILENAME_AUG + '_R' + str(self.res).replace('.', '-') + '.txt')
         else:
-            data_file = os.path.join(self.base_dir, SAVE_FILENAME)
+            data_file = os.path.join(self.base_dir, SAVE_FILENAME + '_R' + str(self.res).replace('.', '-') + '.txt')
         f = open(data_file, "r")
         for line in f:
             fname, vx, vy, vz, count_group = line.split(' ')
@@ -368,8 +361,8 @@ class VoxelAnalyzer:
         c = 0
         for i in range(grid3.shape[0]):
             if counts_per_grid_cell[i] > 0:
-                print('{}: {:4f} {:4f} {:4f} -- {}'.format(c, grid3[i][0], grid3[i][0], grid3[i][0],
-                                                           int(counts_per_grid_cell[i])))
+                #print('{}: {:4f} {:4f} {:4f} -- {}'.format(c, grid3[i][0], grid3[i][0], grid3[i][0],
+                #                                           int(counts_per_grid_cell[i])))
                 c += 1
             else:
                 num_empty_cells += 1
@@ -423,11 +416,11 @@ if __name__ == '__main__':
     # args.ho3d_path = '/home/tpatten/'
     args.gripper_cloud_path = 'hand_open_new.pcd'
     args.resolution = 0.025
-    args.augmentation = True
+    args.augmentation = False
     args.axis_symmetry = True
     args.visualize = False
-    args.save = True
-    args.verbose = False
+    args.save = False
+    args.verbose = True
     args.hard_limits = None
     # args.hard_limits = []
 
