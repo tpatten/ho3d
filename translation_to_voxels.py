@@ -22,6 +22,7 @@ class VoxelVisualizer:
         self.save = args.save
         self.verbose = args.verbose
         self.do_visualize = args.visualize
+        self.hard_limits = args.hard_limits
 
         gripper_pcd = o3d.io.read_point_cloud(args.gripper_cloud_path)
         self.gripper_xyz = np.asarray(gripper_pcd.points).T
@@ -66,8 +67,8 @@ class VoxelVisualizer:
 
                 voxels = self.compute_voxels(hand_joints, grasp_position=grasp_position)
                 x_lim = abs(voxels[0][0])
-                y_lim = abs(voxels[1][0])
-                z_lim = abs(voxels[2][0])
+                y_lim = abs(voxels[0][1])
+                z_lim = abs(voxels[0][2])
                 if x_lim > max_lims[0]:
                     max_lims[0] = x_lim
                 if y_lim > max_lims[1]:
@@ -89,8 +90,10 @@ class VoxelVisualizer:
                               np.arange(-n_steps[2] * self.res, n_steps[2] * self.res, self.res))
 
         grid3 = np.asarray(list(zip(x.flatten(), y.flatten(), z.flatten())))
-        print('Axis limits:\t{:.4f}\t{:.4f}\t{:.4f}'.format(max_lims[0], max_lims[1], max_lims[2]))
-        print('Number of elements:\t{}'.format(grid3.shape[0]))
+        max_lims = max_lims.flatten()
+        print('Final axis limits: {:.4f}  {:.4f}  {:.4f}'.format(max_lims[0], max_lims[1], max_lims[2]))
+        print('Number of elements: {}'.format(grid3.shape[0]))
+
         ## Save
         #if self.save:
         #    # base_dir = os.path.join(self.base_dir, self.data_split, self.args.scene)
@@ -122,13 +125,10 @@ class VoxelVisualizer:
             dist = np.sqrt(np.sum(grasp_position ** 2))
             lims = grasp_position
         lims = lims.reshape(3, 1)
+        if self.hard_limits is not None:
+            lims = np.asarray(self.hard_limits).reshape(3, 1)
 
-        if self.axis_symmetry:
-            n_steps = abs(ceil(dist / self.res))
-            x, y, z = np.meshgrid(np.arange(-n_steps * self.res, n_steps * self.res, self.res),
-                                  np.arange(-n_steps * self.res, n_steps * self.res, self.res),
-                                  np.arange(-n_steps * self.res, n_steps * self.res, self.res))
-        else:
+        if self.hard_limits is not None or not self.axis_symmetry:
             n_steps = np.abs(np.ceil(lims / self.res))
             for i in range(n_steps.shape[0]):
                 if n_steps[i] == 0:
@@ -136,16 +136,24 @@ class VoxelVisualizer:
             x, y, z = np.meshgrid(np.arange(-n_steps[0] * self.res, n_steps[0] * self.res, self.res),
                                   np.arange(-n_steps[1] * self.res, n_steps[1] * self.res, self.res),
                                   np.arange(-n_steps[2] * self.res, n_steps[2] * self.res, self.res))
+        else:
+            n_steps = abs(ceil(dist / self.res))
+            x, y, z = np.meshgrid(np.arange(-n_steps * self.res, n_steps * self.res, self.res),
+                                  np.arange(-n_steps * self.res, n_steps * self.res, self.res),
+                                  np.arange(-n_steps * self.res, n_steps * self.res, self.res))
+
         grid3 = np.asarray(list(zip(x.flatten(), y.flatten(), z.flatten())))
 
-        if self.verbose and grasp_position is not None:
-            dists = np.linalg.norm(grid3 - grasp_position, axis=1)
-            min_idx = np.argmin(dists)
-            print('Min dist {:.0f}mm'.format(dists[min_idx]*1000))
-
         if self.verbose:
-            print('Max dist {:.0f}mm'.format(dist*1000))
+            if grasp_position is None:
+                print('Max dist {:.0f}mm'.format(dist * 1000))
+            else:
+                dists = np.linalg.norm(grid3 - grasp_position, axis=1)
+                min_idx = np.argmin(dists)
+                print('Min dist {:.0f}mm'.format(dists[min_idx]*1000))
             print('Num voxels {}'.format(grid3.shape[0]))
+            print('Axis lims: {:.4f}  {:.4f}  {:.4f}'.format(abs(grid3[0][0]), abs(grid3[0][1]), abs(grid3[0][2])))
+
         return grid3
 
     def visualize(self, voxels, hand_joints, grasp_pose=None):
@@ -248,6 +256,8 @@ if __name__ == '__main__':
     args.visualize = False
     args.save = False
     args.verbose = False
+    args.hard_limits = None
+    # args.hard_limits = []
 
     # Visualize the voxels
     voxel_visualizer = VoxelVisualizer(args)
