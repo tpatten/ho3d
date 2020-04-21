@@ -48,6 +48,7 @@ class VoxelVisualizer:
 
         max_lims = np.zeros((3, 1))
         counts = {}
+        counts[1] = []
         counts[8] = []
         counts[27] = []
         counts[64] = []
@@ -73,8 +74,8 @@ class VoxelVisualizer:
                 grasp_position = grasp[:3, 3].flatten()
                 # grasp_position = None
 
-                voxels = self.compute_voxels(hand_joints, grasp_position=grasp_position)
-                counts[voxels.shape[0]].append(s + '/' + str(frame_id))
+                voxels, voxel_center = self.compute_voxels(hand_joints, grasp_position=grasp_position)
+                counts[voxels.shape[0]].append((s + '/' + str(frame_id), voxel_center))
 
                 x_lim = abs(voxels[0][0])
                 y_lim = abs(voxels[0][1])
@@ -112,7 +113,7 @@ class VoxelVisualizer:
             f = open(filename, "w")
             for c in counts:
                 for s in counts[c]:
-                    f.write("{} {}\n".format(s, c))
+                    f.write("{} {:.4f} {:.4f} {:.4f} {}\n".format(s[0], s[1][0], s[1][1], s[1][2], c))
             f.close()
 
     def load_data(self, seq_name, frame_id):
@@ -160,6 +161,12 @@ class VoxelVisualizer:
 
         grid3 = np.asarray(list(zip(x.flatten(), y.flatten(), z.flatten())))
 
+        nearest_voxel = [1000, 1000, 1000]
+        if grasp_position is not None:
+            dists = np.linalg.norm(grid3 - (grasp_position - offset), axis=1)
+            min_idx = np.argmin(dists)
+            nearest_voxel = grid3[min_idx]
+
         if self.verbose:
             if grasp_position is None:
                 print('Max dist {:.0f}mm'.format(dist * 1000))
@@ -170,7 +177,7 @@ class VoxelVisualizer:
             print('Num voxels {}'.format(grid3.shape[0]))
             print('Axis lims: {:.4f}  {:.4f}  {:.4f}'.format(abs(grid3[0][0]), abs(grid3[0][1]), abs(grid3[0][2])))
 
-        return grid3
+        return grid3, nearest_voxel
 
     def visualize(self, voxels, hand_joints, grasp_pose=None):
         offset = np.expand_dims(np.mean(hand_joints, axis=0), 0)
