@@ -11,6 +11,7 @@ SUBJECTS = ['ABF', 'BB', 'GPMF', 'GSF', 'MDF', 'ShSu']
 DIAMETER = 0.232280153674483
 PASSGREEN = lambda x: '\033[92m' + x + '\033[0m'
 FAILRED = lambda x: '\033[91m' + x + '\033[0m'
+SAVE_FILENAME = 'translation_classification_counts.txt'
 
 
 class VoxelVisualizer:
@@ -109,7 +110,7 @@ class VoxelVisualizer:
 
         # Save
         if self.save:
-            filename = os.path.join(self.base_dir, 'translation_classification_counts.txt')
+            filename = os.path.join(self.base_dir, SAVE_FILENAME)
             f = open(filename, "w")
             for c in counts:
                 for s in counts[c]:
@@ -268,11 +269,109 @@ class VoxelVisualizer:
         vis.destroy_window()
 
 
+class VoxelAnalyzer:
+    def __init__(self, args):
+        self.base_dir = args.ho3d_path
+        self.res = args.resolution
+
+        counts, grid3, counts_per_grid_cell = self.analyze()
+
+        self.visualize(grid3, counts_per_grid_cell)
+
+    def analyze(self):
+        # Set up structures to store data
+        counts = {}
+        counts[1] = []
+        counts[8] = []
+        counts[27] = []
+        counts[64] = []
+        counts[125] = []
+        counts[216] = []
+        counts[343] = []
+        counts[512] = []
+
+        n_steps = 4
+        x, y, z = np.meshgrid(np.arange(-n_steps * self.res, n_steps * self.res, self.res),
+                              np.arange(-n_steps * self.res, n_steps * self.res, self.res),
+                              np.arange(-n_steps * self.res, n_steps * self.res, self.res))
+        grid3 = np.asarray(list(zip(x.flatten(), y.flatten(), z.flatten())))
+        counts_per_grid_cell = np.zeros((grid3.shape[0], 1))
+
+        # Load the file
+        data_file = os.path.join(self.base_dir, SAVE_FILENAME)
+        f = open(data_file, "r")
+        for line in f:
+            fname, vx, vy, vz, count_group = line.split(' ')
+            vx = float(vx)
+            vy = float(vy)
+            vz = float(vz)
+            count_group = int(count_group.rstrip())
+            counts[count_group].append(fname)
+            dists = np.linalg.norm(grid3 - np.asarray([vx, vy, vz]), axis=1)
+            min_idx = np.argmin(dists)
+            counts_per_grid_cell[min_idx] += 1
+        f.close()
+
+        counts_per_grid_cell = counts_per_grid_cell.flatten()
+
+        for c in counts:
+            print('{}:\t{}'.format(c, len(counts[c])))
+
+        num_empty_cells = 0
+        c = 0
+        for i in range(grid3.shape[0]):
+            if counts_per_grid_cell[i] > 0:
+                print('{}: {:4f} {:4f} {:4f} -- {}'.format(c, grid3[i][0], grid3[i][0], grid3[i][0],
+                                                           int(counts_per_grid_cell[i])))
+                c += 1
+            else:
+                num_empty_cells += 1
+        print('Number of empty grid cells: {}'.format(num_empty_cells))
+
+        return counts, grid3, counts_per_grid_cell
+
+    def visualize(self, voxels, counts):
+        # Create visualizer
+        vis = o3d.visualization.Visualizer()
+        vis.create_window()
+
+        # Add the coordinate frame
+        vis.add_geometry(o3d.create_mesh_coordinate_frame(size=0.05))
+
+        # Add the voxels as a point cloud
+        cloud = o3d.geometry.PointCloud()
+        cloud.points = o3d.utility.Vector3dVector(voxels)
+        cloud.paint_uniform_color([1, 0, 0])
+        colors = np.asarray(cloud.colors)
+        for i in range(voxels.shape[0]):
+            if counts[i] == 0:
+                colors[i] = [0.7, 0.7, 0.7]
+        cloud.colors = o3d.utility.Vector3dVector(colors)
+        vis.add_geometry(cloud)
+
+        # Add the voxels
+        box_dim = 0.1 * self.res
+        for i in range(voxels.shape[0]):
+            if counts[i] > 0:
+                mm = o3d.create_mesh_box(width=box_dim, height=box_dim, depth=box_dim)
+                mm.compute_vertex_normals()
+                mm.paint_uniform_color([1, 0, 0])
+                tt = np.eye(4)
+                tt[0:3, 3] = voxels[i] - 0.5 * box_dim
+                mm.transform(tt)
+                vis.add_geometry(mm)
+
+        # Run the visualizer
+        vis.run()
+        vis.destroy_window()
+
+
 if __name__ == '__main__':
     # Parse the arguments
     parser = argparse.ArgumentParser(description='HANDS19 - Task#3 HO-3D Translation voxel visualization')
     args = parser.parse_args()
-    args.ho3d_path = '/home/tpatten/v4rtemp/datasets/HandTracking/HO3D_v2/'
+    # args.ho3d_path = '/home/tpatten/v4rtemp/datasets/HandTracking/HO3D_v2/'
+    args.ho3d_path = '/home/tpatten/'
     args.gripper_cloud_path = 'hand_open_new.pcd'
     args.resolution = 0.025
     args.axis_symmetry = True
@@ -283,5 +382,7 @@ if __name__ == '__main__':
     # args.hard_limits = []
 
     # Visualize the voxels
-    voxel_visualizer = VoxelVisualizer(args)
+    #voxel_visualizer = VoxelVisualizer(args)
 
+    # Analyze the voxels
+    voxel_analyzer = VoxelAnalyzer(args)
