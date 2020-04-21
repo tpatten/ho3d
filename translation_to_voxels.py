@@ -47,6 +47,14 @@ class VoxelVisualizer:
         sub_dirs = valid_sub_dirs
 
         max_lims = np.zeros((3, 1))
+        counts = {}
+        counts[8] = []
+        counts[27] = []
+        counts[64] = []
+        counts[125] = []
+        counts[216] = []
+        counts[343] = []
+        counts[512] = []
         for s in sub_dirs:
             # Get the scene ids
             frame_ids = os.listdir(os.path.join(self.base_dir, self.data_split, s, 'rgb'))
@@ -66,6 +74,8 @@ class VoxelVisualizer:
                 # grasp_position = None
 
                 voxels = self.compute_voxels(hand_joints, grasp_position=grasp_position)
+                counts[voxels.shape[0]].append(s + '/' + str(frame_id))
+
                 x_lim = abs(voxels[0][0])
                 y_lim = abs(voxels[0][1])
                 z_lim = abs(voxels[0][2])
@@ -93,11 +103,17 @@ class VoxelVisualizer:
         max_lims = max_lims.flatten()
         print('Final axis limits: {:.4f}  {:.4f}  {:.4f}'.format(max_lims[0], max_lims[1], max_lims[2]))
         print('Number of elements: {}'.format(grid3.shape[0]))
+        for c in counts:
+            print('{}:\t{}'.format(c, len(counts[c])))
 
-        ## Save
-        #if self.save:
-        #    # base_dir = os.path.join(self.base_dir, self.data_split, self.args.scene)
-        #    # self.save_clouds_and_camera_poses(base_dir, processed_frames, cam_poses, mask_pcds)
+        # Save
+        if self.save:
+            filename = os.path.join(self.base_dir, 'translation_classification_counts.txt')
+            f = open(filename, "w")
+            for c in counts:
+                for s in counts[c]:
+                    f.write("{} {}\n".format(s, c))
+            f.close()
 
     def load_data(self, seq_name, frame_id):
         anno = read_annotation(self.base_dir, seq_name, frame_id, self.data_split)
@@ -254,7 +270,7 @@ if __name__ == '__main__':
     args.resolution = 0.025
     args.axis_symmetry = True
     args.visualize = False
-    args.save = False
+    args.save = True
     args.verbose = False
     args.hard_limits = None
     # args.hard_limits = []
