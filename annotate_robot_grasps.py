@@ -139,7 +139,8 @@ class RobotGraspAnnotator:
                     self.kd_tree = o3d.geometry.KDTreeFlann(self.pcd)
 
                     # Get the gripper transform
-                    tf_gripper, grasp_points, mid_point, wrist_point = self.get_gripper_transform(joints3d_anno, obj_trans, obj_rot)
+                    tf_gripper, grasp_points, mid_point, wrist_point = self.get_gripper_transform(joints3d_anno,
+                                                                                                  obj_trans, obj_rot)
                     transforms.append(tf_gripper)
                     if grasp_points is not None:
                         scores.append(1.0)
@@ -165,28 +166,33 @@ class RobotGraspAnnotator:
                     _, hand_mesh = forwardKinematics(anno['handPose'], anno['handTrans'], anno['handBeta'])
 
                     if self.do_visualize:
-                        self.visualize_hand_and_grasp(joints3d_anno, transforms[-1], grasp_points, mid_point, wrist_point, scene_pcd, hand_mesh)
+                        self.visualize_hand_and_grasp(joints3d_anno, transforms[-1], grasp_points, mid_point,
+                                                      wrist_point, scene_pcd, hand_mesh)
                         # self.visualize_grasp([transforms[-1]])
                         # self.visualize_grasps_all(transforms)
 
                     if self.do_save:
-                        save_filename = os.path.join(self.base_dir, self.data_split, d, 'meta', 'grasp_' + str(id) + '.pkl')
+                        save_filename = os.path.join(self.base_dir, self.data_split, d, 'meta',
+                                                     'grasp_' + str(id) + '.pkl')
                         save_grasp_annotation_pkl(save_filename, tf_gripper)
-                        save_filename = os.path.join(self.base_dir, self.data_split, d, 'meta', 'cloud_' + str(id) + '.ply')
+                        save_filename = os.path.join(self.base_dir, self.data_split, d, 'meta',
+                                                     'cloud_' + str(id) + '.ply')
                         o3d.io.write_point_cloud(save_filename, scene_pcd)
 
-                        save_filename = os.path.join(self.base_dir, self.data_split, d, 'meta', 'hand_mesh_' + str(id) + '.ply')
+                        save_filename = os.path.join(self.base_dir, self.data_split, d, 'meta',
+                                                     'hand_mesh_' + str(id) + '.ply')
                         mesh = o3d.geometry.TriangleMesh()
                         if hasattr(hand_mesh, 'r'):
                             mesh.vertices = o3d.utility.Vector3dVector(np.copy(hand_mesh.r))
-                            numVert = hand_mesh.r.shape[0]
+                            num_vert = hand_mesh.r.shape[0]
                         elif hasattr(hand_mesh, 'v'):
                             mesh.vertices = o3d.utility.Vector3dVector(np.copy(hand_mesh.v))
-                            numVert = hand_mesh.v.shape[0]
+                            num_vert = hand_mesh.v.shape[0]
                         else:
                             raise Exception('Unknown Mesh format')
                         mesh.triangles = o3d.utility.Vector3iVector(np.copy(hand_mesh.f))
-                        mesh.vertex_colors = o3d.utility.Vector3dVector(np.tile(np.array([[0.9, 0.4, 0.4]]), [numVert, 1]))
+                        mesh.vertex_colors = o3d.utility.Vector3dVector(np.tile(np.array([[0.9, 0.4, 0.4]]),
+                                                                                [num_vert, 1]))
                         o3d.io.write_triangle_mesh(save_filename, mesh)
 
         # Write to file
@@ -470,7 +476,7 @@ class RobotGraspAnnotator:
                     rot_diff = np.abs(np.degrees(np.array(
                         tf3d.euler.mat2euler(np.matmul(np.linalg.inv(tf_prop[:3, :3]), tf_temp[:3, :3]), 'szyx'))))
                     # -180~180
-                    if rot_diff[0] < merge_th_rotation or (180 - rot_diff[0]) < merge_th_rotation:  # consider the flipped hand
+                    if rot_diff[0] < merge_th_rotation or (180 - rot_diff[0]) < merge_th_rotation:  # flipped hand
                         if rot_diff[1] < merge_th_rotation and rot_diff[2] < merge_th_rotation:
                             m_quat.append(tf3d.quaternions.mat2quat(tf_temp[:3, :3]))
                             m_trans.append(tf_temp[:3, 3])
@@ -595,7 +601,8 @@ class RobotGraspAnnotator:
         vis.run()
         vis.destroy_window()
 
-    def visualize_hand_and_grasp(self, joints3d, transform, grasp_points, mid_point, wrist_point, scene_pcd=None, hand_mesh = None):
+    def visualize_hand_and_grasp(self, joints3d, transform, grasp_points, mid_point, wrist_point, scene_pcd=None,
+                                 hand_mesh=None):
         # Create visualizer
         vis = o3d.visualization.Visualizer()
         vis.create_window()
