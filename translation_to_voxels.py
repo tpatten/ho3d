@@ -7,6 +7,8 @@ import numpy as np
 import open3d as o3d
 from math import ceil
 import transforms3d as tf3d
+from scipy.spatial.distance import cityblock
+import collections
 
 SUBJECTS = ['ABF', 'BB', 'GPMF', 'GSF', 'MDF', 'ShSu']
 DIAMETER = 0.232280153674483
@@ -315,7 +317,8 @@ class VoxelAnalyzer:
 
         counts, grid3, counts_per_grid_cell = self.analyze()
 
-        self.visualize(grid3, counts_per_grid_cell)
+        if args.visualize:
+            self.visualize(grid3, counts_per_grid_cell)
 
     def analyze(self):
         # Set up structures to store data
@@ -359,6 +362,7 @@ class VoxelAnalyzer:
         for c in counts:
             print('{}:\t{}'.format(c, len(counts[c])))
 
+        dist_counts = {}
         num_used_cells = 0
         num_empty_cells = 0
         lims = np.zeros((2, 3))
@@ -369,8 +373,10 @@ class VoxelAnalyzer:
                         lims[1][j] = grid3[i][j]
                     elif grid3[i][j] < lims[0][j]:
                         lims[0][j] = grid3[i][j]
-                # print('{}: {:4f} {:4f} {:4f} -- {}'.format(num_used_cells, grid3[i][0], grid3[i][0], grid3[i][0],
-                #                                            int(counts_per_grid_cell[i])))
+                mdist = cityblock(np.asarray([0, 0, 0]), grid3[i])
+                if dist_counts.get(mdist) is None:
+                    dist_counts[mdist] = 0
+                dist_counts[mdist] += counts_per_grid_cell[i]
                 num_used_cells += 1
             else:
                 num_empty_cells += 1
@@ -382,7 +388,9 @@ class VoxelAnalyzer:
             lims[1][0] - lims[0][0] + 1, lims[1][1] - lims[0][1] + 1, lims[1][2] - lims[0][2] + 1,
             (lims[1][0] - lims[0][0] + 1) * (lims[1][1] - lims[0][1] + 1) * (lims[1][2] - lims[0][2] + 1)))
 
-        # Generate real grid
+        od = collections.OrderedDict(sorted(dist_counts.items()))
+        for k, v in od.items():
+            print('{:.3f} : {}\t\t{}'.format(k, int(v), int(k / self.res)))
 
         return counts, grid3, counts_per_grid_cell
 
@@ -428,7 +436,7 @@ if __name__ == '__main__':
     args = parser.parse_args()
     args.ho3d_path = '/home/tpatten/v4rtemp/datasets/HandTracking/HO3D_v2/'
     args.gripper_cloud_path = 'hand_open_new.pcd'
-    args.resolution = 0.05
+    args.resolution = 0.025
     args.augmentation = False
     args.axis_symmetry = True
     args.visualize = False
