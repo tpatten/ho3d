@@ -16,7 +16,7 @@ SAVE_FILENAME = 'translation_classification_counts'
 SAVE_FILENAME_AUG = 'translation_classification_counts_augmented'
 
 
-class VoxelVisualizer:
+class VoxelGenerator:
     def __init__(self, args):
         self.base_dir = args.ho3d_path
         self.data_split = 'train'
@@ -31,10 +31,10 @@ class VoxelVisualizer:
         gripper_pcd = o3d.io.read_point_cloud(args.gripper_cloud_path)
         self.gripper_xyz = np.asarray(gripper_pcd.points).T
 
-        # Compute and visualize
-        self.visualize_voxels()
+        # Generate and visualize
+        self.generate_voxels()
 
-    def visualize_voxels(self):
+    def generate_voxels(self):
         # For each subject
         sub_dirs = os.listdir(os.path.join(self.base_dir, self.data_split))
         valid_sub_dirs = []
@@ -191,6 +191,15 @@ class VoxelVisualizer:
                 min_idx = np.argmin(dists)
                 print('Min dist {:.0f}mm'.format(dists[min_idx]*1000))
                 print('Vox dist {:.0f}mm'.format(np.linalg.norm(nearest_voxel - grasp_position.flatten()) * 1000))
+                gripper_gt = self.get_transformed_gripper_pcd(grasp_position.flatten(), np.eye(3))
+                gripper_approx = self.get_transformed_gripper_pcd(nearest_voxel, np.eye(3))
+                add_error = np.linalg.norm(gripper_gt - gripper_approx, axis=0).mean()
+                print('ADD error {:.4f} / {:.2f}%'.format(add_error, add_error / DIAMETER * 100))
+                if add_error < 0.1 * DIAMETER:
+                    print('%s' % (PASSGREEN('PASS')))
+                else:
+                    print('%s' % (FAILRED('FAIL')))
+
             print('Num voxels {}'.format(grid3.shape[0]))
             print('Axis lims: {:.4f}  {:.4f}  {:.4f}'.format(abs(grid3[0][0]), abs(grid3[0][1]), abs(grid3[0][2])))
 
@@ -202,7 +211,6 @@ class VoxelVisualizer:
         rotation_matrix = tf3d.euler.euler2mat(np.random.uniform(-np.pi, np.pi),
                                                np.random.uniform(-np.pi, np.pi),
                                                np.random.uniform(-np.pi, np.pi))
-        print('Rotation matrix\n', rotation_matrix)
         point_set_augmented = np.copy(point_set)
         if not disable_global:
             point_set_augmented = np.matmul(point_set_augmented, rotation_matrix)
@@ -216,11 +224,16 @@ class VoxelVisualizer:
 
         # target_augmented = target_augmented.reshape((1, 9)).flatten()
 
-        print('Augmentation')
-        print(np.linalg.norm(point_set - point_set_augmented, axis=1))
-        print(np.linalg.norm(target - target_augmented, axis=1))
-
         return point_set_augmented, target_augmented
+
+    def get_transformed_gripper_pcd(self, translation, rotation):
+        gripper_tf = np.copy(self.gripper_xyz)
+        gripper_tf = np.matmul(rotation, gripper_tf)
+        gripper_tf[0, :] += translation[0]
+        gripper_tf[1, :] += translation[1]
+        gripper_tf[2, :] += translation[2]
+
+        return gripper_tf
 
     def visualize(self, voxels, hand_joints, grasp_pose=None):
         offset = np.expand_dims(np.mean(hand_joints, axis=0), 0)
@@ -229,7 +242,7 @@ class VoxelVisualizer:
         if grasp_pose is not None:
             dists = np.linalg.norm(voxels - (grasp_pose[:3, 3].flatten() - offset), axis=1)
             min_idx = np.argmin(dists)
-            print('Translation error {:.0f}mm'.format(dists[min_idx] * 1000))
+            # print('Translation error {:.0f}mm'.format(dists[min_idx] * 1000))
             nearest_voxel = voxels[min_idx]
 
         # Create visualizer
@@ -277,34 +290,17 @@ class VoxelVisualizer:
             mm.transform(tt)
             vis.add_geometry(mm)
 
-            gripper_gt = np.copy(self.gripper_xyz)
-            gripper_gt = np.matmul(grasp_pose[:3, :3], gripper_gt)
-            gripper_gt[0, :] += (grasp_pose[0, 3] - offset[0][0])
-            gripper_gt[1, :] += (grasp_pose[1, 3] - offset[0][1])
-            gripper_gt[2, :] += (grasp_pose[2, 3] - offset[0][2])
+            gripper_gt = self.get_transformed_gripper_pcd((grasp_pose[:3, 3] - offset).flatten(), grasp_pose[:3, :3])
             gripper_pcd = o3d.geometry.PointCloud()
             gripper_pcd.points = o3d.utility.Vector3dVector(gripper_gt.T)
             gripper_pcd.paint_uniform_color([0.9, 0.4, 0.4])
             vis.add_geometry(gripper_pcd)
 
-            discretised_grasp_pose = np.copy(grasp_pose)
-            discretised_grasp_pose[:3, 3] = nearest_voxel
-            gripper_approx = np.copy(self.gripper_xyz)
-            gripper_approx = np.matmul(grasp_pose[:3, :3], gripper_approx)
-            gripper_approx[0, :] += discretised_grasp_pose[0, 3]
-            gripper_approx[1, :] += discretised_grasp_pose[1, 3]
-            gripper_approx[2, :] += discretised_grasp_pose[2, 3]
+            gripper_approx = self.get_transformed_gripper_pcd(nearest_voxel, grasp_pose[:3, :3])
             gripper_pcd_approx = o3d.geometry.PointCloud()
             gripper_pcd_approx.points = o3d.utility.Vector3dVector(gripper_approx.T)
             gripper_pcd_approx.paint_uniform_color([0.4, 0.9, 0.4])
             vis.add_geometry(gripper_pcd_approx)
-
-            add_error = np.linalg.norm(gripper_gt - gripper_approx, axis=0).mean()
-            print('ADD error {:.4f}'.format(add_error))
-            if add_error < 0.1*DIAMETER:
-                print('%s' % (PASSGREEN('PASS')))
-            else:
-                print('%s' % (FAILRED('FAIL')))
 
         # Run the visualizer
         vis.run()
@@ -430,10 +426,9 @@ if __name__ == '__main__':
     # Parse the arguments
     parser = argparse.ArgumentParser(description='HANDS19 - Task#3 HO-3D Translation voxel visualization')
     args = parser.parse_args()
-    # args.ho3d_path = '/home/tpatten/v4rtemp/datasets/HandTracking/HO3D_v2/'
-    args.ho3d_path = '/home/tpatten/'
+    args.ho3d_path = '/home/tpatten/v4rtemp/datasets/HandTracking/HO3D_v2/'
     args.gripper_cloud_path = 'hand_open_new.pcd'
-    args.resolution = 0.025
+    args.resolution = 0.05
     args.augmentation = False
     args.axis_symmetry = True
     args.visualize = False
@@ -441,9 +436,13 @@ if __name__ == '__main__':
     args.verbose = False
     args.hard_limits = None
     # args.hard_limits = []
+    args.analyze_mode = False
+    if args.analyze_mode:
+        args.ho3d_path = '/home/tpatten/'
 
-    # Visualize the voxels
-    # voxel_visualizer = VoxelVisualizer(args)
-
-    # Analyze the voxels
-    voxel_analyzer = VoxelAnalyzer(args)
+    if not args.analyze_mode:
+        # Visualize the voxels
+        voxel_gen = VoxelGenerator(args)
+    else:
+        # Analyze the voxels
+        voxel_analyzer = VoxelAnalyzer(args)
