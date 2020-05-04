@@ -70,7 +70,7 @@ if __name__ == '__main__':
     # parse the arguments
     parser = argparse.ArgumentParser(description='HANDS19 - Task#3 HO-3D Visualize grasps')
     args = parser.parse_args()
-    args.file = '/home/tpatten/v4rtemp/datasets/HandTracking/HO3D_v2/train/ABF10/meta/0000.pkl'
+    args.file = '/home/tpatten/v4rtemp/datasets/HandTracking/HO3D_v2/train/MDF10/meta/0138.pkl'
     args.models_path = '/home/tpatten/v4rtemp/datasets/HandTracking/HO3D_v2/models'
     args.gripper_cloud_path = 'hand_open_new.pcd'
 

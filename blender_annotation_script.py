@@ -8,7 +8,7 @@ import copy
 
 inspect_mode = True
 c_id = np.array([0])
-target_dir = "/home/tpatten/v4rtemp/datasets/HandTracking/HO3D_v2/train/ABF11/meta/"
+target_dir = "/home/tpatten/v4rtemp/datasets/HandTracking/HO3D_v2/train/MDF10/meta/"
 gripper_model_dir = "/home/tpatten/v4rtemp/datasets/HandTracking/HO3D_v2/"
 gripper_model_fn = "hand_open_aligned.ply"
 textured_model_dir = "/home/tpatten/v4rtemp/datasets/HandTracking/HO3D_v2/models/"
@@ -59,8 +59,8 @@ class loadNext(bpy.types.Operator):
         if ind >= len(file_list):
             return {'FINISHED'}
 
-        target_fn = os.path.join(target_dir, file_list[ind])
-        _ = bpy.ops.import_mesh.ply(filepath=target_fn)
+        #target_fn = os.path.join(target_dir, file_list[ind])
+        #_ = bpy.ops.import_mesh.ply(filepath=target_fn)
 
         for o in bpy.context.scene.objects:
             if o.type == 'MESH':
@@ -91,6 +91,7 @@ class loadNext(bpy.types.Operator):
                     in_pose = pickle.load(f, encoding='latin1')
                 except:
                     in_pose = pickle.load(f)
+                in_pose = in_pose.reshape((4, 4))
             if in_pose is not None:
                 euler_angles = tf3d.euler.mat2euler(in_pose[:3, :3])
                 obj_object = bpy.data.objects[obj_name]
