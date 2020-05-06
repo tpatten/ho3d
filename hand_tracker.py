@@ -318,9 +318,9 @@ class HandTracker:
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Hand tracker using OpenCV')
+    parser.add_argument("-target", type=str, help="Name of the target subset",
+                        choices=['ABF10', 'BB10', 'GPMF10', 'GSF10', 'MDF10', 'ShSu10'], default='ABF10')
     args = parser.parse_args()
-    args.add_argument("target", type=str, help="Name of the target subset",
-                      choices=['ABF10', 'BB10', 'GPMF10', 'GSF10', 'MDF10', 'ShSu10'], default='ABF10')
     args.proto_file = 'caffe_models/pose_deploy.prototxt'
     args.weights_file = 'caffe_models/pose_iter_102000.caffemodel'
     args.ho3d_path = '/home/tpatten/v4rtemp/datasets/HandTracking/HO3D_v2/'
