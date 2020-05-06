@@ -93,7 +93,15 @@ class HandTracker:
         rgb_path = os.path.join(args.ho3d_path, 'train', args.target, 'rgb')
         depth_path = os.path.join(args.ho3d_path, 'train', args.target, 'depth')
         meta_path = os.path.join(args.ho3d_path, 'train', args.target, 'meta')
-        save_path = os.path.join(args.ho3d_path, 'train', args.target, 'hand')
+
+        if args.save:
+            save_path = os.path.join(args.ho3d_path, 'train', args.target, 'hand')
+            if not os.path.exists(save_path):
+                try:
+                    os.makedirs(save_path)
+                except OSError:
+                    print('ERROR: Unable to create the save directory {}'.format(save_path))
+                    return
 
         file_list = sorted(os.listdir(rgb_path))
         for im in file_list:
@@ -311,12 +319,13 @@ class HandTracker:
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Hand tracker using OpenCV')
     args = parser.parse_args()
+    args.add_argument("target", type=str, help="Name of the target subset",
+                      choices=['ABF10', 'BB10', 'GPMF10', 'GSF10', 'MDF10', 'ShSu10'], default='ABF10')
     args.proto_file = 'caffe_models/pose_deploy.prototxt'
     args.weights_file = 'caffe_models/pose_iter_102000.caffemodel'
     args.ho3d_path = '/home/tpatten/v4rtemp/datasets/HandTracking/HO3D_v2/'
     args.models_path = '/home/tpatten/v4rtemp/datasets/HandTracking/HO3D_v2/models'
-    args.gripper_cloud_path = 'hand_open_new.pcd'
-    args.target = 'ABF10'
+    # args.target = 'BB10'
     args.visualize = False
     args.save = True
 
