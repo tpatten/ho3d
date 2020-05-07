@@ -69,7 +69,6 @@ class HandTracker:
         self.pcd = None
         self.joints_gt = None
         self.cam_mat = None
-        self.tracker_offset = np.asarray(args.tracker_offset)
 
         self.rgb_path = os.path.join(args.ho3d_path, 'train', args.target, 'rgb')
         self.depth_path = os.path.join(args.ho3d_path, 'train', args.target, 'depth')
@@ -120,7 +119,7 @@ class HandTracker:
 
             # Visualize
             if args.visualize:
-                self.draw_image(points_2d)
+                # self.draw_image(points_2d)
                 self.visualize_3D()
 
             if args.save:
@@ -142,7 +141,7 @@ class HandTracker:
                     pickle_data = pickle.load(f, encoding='latin1')
                 except:
                     pickle_data = pickle.load(f)
-            return list(map(tuple, pickle_data['handJoints2D'].astype(int))), pickle_data['handJoints3D'] / 1000
+            return list(map(tuple, pickle_data['handJoints2D'].astype(int))), pickle_data['handJoints3D']
 
         self.width = self.rgb_image.shape[1]
         self.height = self.rgb_image.shape[0]
