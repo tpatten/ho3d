@@ -24,26 +24,6 @@ class JointShapes(IntEnum):
     BOX = 2
 
 
-def get_image_names(object_anno_path, object_name):
-    # Open the object annotation file
-    image_names = []
-    with open(object_anno_path, 'r') as file:
-        # read each line
-        for anno in file:
-            # Split the line into words
-            anno = anno.split('\t')
-            if anno[-1] == '\n':
-                anno = anno[:-1]
-            # Get the object name
-            object_id = anno[1]
-            if object_id == object_name:
-                img_name = anno[0]
-                image_names.append(img_name)
-
-    # Return all the frame ids for the selected object
-    return image_names
-
-
 def to_iccv_format(joints):
     # MONOHAND [Wrist (0),
     #           TMCP (1), TPIP (2), TDIP (3), TTIP (4),
