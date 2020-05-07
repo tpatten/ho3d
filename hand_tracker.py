@@ -69,10 +69,12 @@ class HandTracker:
         self.pcd = None
         self.joints_gt = None
         self.cam_mat = None
+        self.tracker_offset = np.asarray(args.tracker_offset)
 
-        rgb_path = os.path.join(args.ho3d_path, 'train', args.target, 'rgb')
-        depth_path = os.path.join(args.ho3d_path, 'train', args.target, 'depth')
-        meta_path = os.path.join(args.ho3d_path, 'train', args.target, 'meta')
+        self.rgb_path = os.path.join(args.ho3d_path, 'train', args.target, 'rgb')
+        self.depth_path = os.path.join(args.ho3d_path, 'train', args.target, 'depth')
+        self.meta_path = os.path.join(args.ho3d_path, 'train', args.target, 'meta')
+        self.tracker_path = os.path.join(args.ho3d_path, 'train', args.target, 'hand_tracker')
 
         if args.save:
             save_path = os.path.join(args.ho3d_path, 'train', args.target, 'hand')
@@ -83,11 +85,11 @@ class HandTracker:
                     print('ERROR: Unable to create the save directory {}'.format(save_path))
                     return
 
-        file_list = sorted(os.listdir(rgb_path))
+        file_list = sorted(os.listdir(self.rgb_path))
         for im in file_list:
             print(im)
-            self.rgb_image, self.dep_image = self.get_images(os.path.join(rgb_path, im), os.path.join(depth_path, im))
-            meta_filename = os.path.join(meta_path, im)
+            self.rgb_image, self.dep_image = self.get_images(im)
+            meta_filename = os.path.join(self.meta_path, im)
             meta_filename = meta_filename.replace(".png", ".pkl")
             anno = read_hand_annotations(meta_filename)
             self.joints_gt = anno['handJoints3D']
@@ -111,7 +113,10 @@ class HandTracker:
             self.pcd.paint_uniform_color([0.5, 0.5, 0.5])
 
             # Estimate the hand joint positions
-            points_2d, self.joints_estimated = self.process()
+            points_2d, self.joints_estimated = self.process(im, args.load_from_tracker)
+
+            if points_2d is None or self.joints_estimated is None:
+                break
 
             # Visualize
             if args.visualize:
@@ -126,7 +131,19 @@ class HandTracker:
                     save_data['handJoints3D'] = self.joints_estimated
                     pickle.dump(save_data, f)
 
-    def process(self):
+    def process(self, image_name, load_from_tracker=False):
+        if load_from_tracker:
+            hand_filename = os.path.join(self.tracker_path, image_name)
+            hand_filename = hand_filename.replace(".png", ".pkl")
+            if not os.path.exists(hand_filename):
+                return None, None
+            with open(hand_filename, 'rb') as f:
+                try:
+                    pickle_data = pickle.load(f, encoding='latin1')
+                except:
+                    pickle_data = pickle.load(f)
+            return list(map(tuple, pickle_data['handJoints2D'].astype(int))), pickle_data['handJoints3D'] / 1000
+
         self.width = self.rgb_image.shape[1]
         self.height = self.rgb_image.shape[0]
         aspect_ratio = self.width / self.height
@@ -153,8 +170,9 @@ class HandTracker:
 
         return points_2d, points_3d
 
-    @staticmethod
-    def get_images(rgb_filename, dep_filename):
+    def get_images(self, image_name):
+        rgb_filename = os.path.join(self.rgb_path, image_name)
+        dep_filename = os.path.join(self.depth_path, image_name)
         rgb_image = cv2.imread(rgb_filename)
         dep_image = cv2.imread(dep_filename)
         depth_scale = 0.00012498664727900177
@@ -305,9 +323,12 @@ if __name__ == '__main__':
     args.weights_file = 'caffe_models/pose_iter_102000.caffemodel'
     args.ho3d_path = '/home/tpatten/v4rtemp/datasets/HandTracking/HO3D_v2/'
     args.models_path = '/home/tpatten/v4rtemp/datasets/HandTracking/HO3D_v2/models'
-    # args.target = 'BB10'
-    args.visualize = False
-    args.save = True
+    args.visualize = True
+    args.save = False
+    args.load_from_tracker = True
+
+    if args.load_from_tracker:
+        args.save = False
 
     print(args)
 
