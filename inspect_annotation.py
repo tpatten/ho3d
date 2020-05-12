@@ -152,7 +152,6 @@ def visualize(object_pcd, hand_pcd, scene_pcd):
 if __name__ == '__main__':
     target_dir = "/home/tpatten/v4rtemp/datasets/HandTracking/HO3D_v2/train/ABF10/"
     models_path = '/home/tpatten/v4rtemp/datasets/HandTracking/HO3D_v2/models'
-    gripper_mesh = None
 
     curr_object_name = ''
     base_object_pcd = o3d.geometry.PointCloud()
