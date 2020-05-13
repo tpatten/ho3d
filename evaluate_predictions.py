@@ -171,7 +171,7 @@ if __name__ == '__main__':
     args.visualize = True
 
     # Save filename
-    save_filename = os.path.join(args.ho3d_path, 'hand_tracker.pkl')
+    save_filename = os.path.join(args.ho3d_path, 'results/hand_tracker_errors.pkl')
     already_processed = os.path.exists(save_filename)
     if already_processed:
         all_results = load_processed(save_filename)
