@@ -95,7 +95,9 @@ class TrajectoryVisualizer:
             num_processed += 1
 
             # Update the previous cloud and pose
-            self.prev_cloud = cloud
+            if self.prev_cloud is None:
+                self.prev_cloud = o3d.geometry.PointCloud()
+            self.prev_cloud.points = o3d.utility.Vector3dVector(cloud)
             self.prev_pose = cam_pose
 
             # Exit if reached the limit
@@ -173,12 +175,16 @@ class TrajectoryVisualizer:
         cam_pose[:3, :3] = rot_max
         cam_pose[:3, 3] = np.matmul(-obj_trans, np.linalg.inv(rot_max))
 
+        # print('obj_trans', obj_trans)
+        # print('t3', np.matmul(-cam_pose[0:3, 3], cam_pose[0:3, 0:3]))
+
         if self.args.use_gt or self.prev_cloud is None:
             return cloud_tfd, cam_pose, cloud_tfd, cam_pose
         else:
             est_cam_pose = np.copy(self.align_icp(cloud))
             est_cloud_tfd = np.copy(cloud)
-            est_cloud_tfd -= est_cam_pose[0:3, 3]
+            est_cloud_trans = np.matmul(-est_cam_pose[0:3, 3], est_cam_pose[0:3, 0:3])
+            est_cloud_tfd -= est_cloud_trans
             est_cloud_tfd = np.matmul(est_cloud_tfd, np.linalg.inv(est_cam_pose[0:3, 0:3]))
             euler_gt = tf3d.euler.mat2euler(cam_pose[:3, :3])
             trans_gt = cam_pose[:3, 3]
@@ -189,6 +195,38 @@ class TrajectoryVisualizer:
                 abs(trans_gt[2] - trans_est[2]) * 100,
                 np.degrees(abs(euler_gt[0] - euler_est[0])), np.degrees(abs(euler_gt[1] - euler_est[1])),
                 np.degrees(abs(euler_gt[2] - euler_est[2]))))
+
+            '''
+            # Debug: Visualize
+            print('--')
+            print('{:.4f}\t{:.4f}\t{:.4f}'.format(obj_trans[0], obj_trans[1], obj_trans[2]))
+            print('{:.4f}\t{:.4f}\t{:.4f}'.format(est_cloud_trans[0], est_cloud_trans[1], est_cloud_trans[2]))
+            print('{:.4f}\t{:.4f}\t{:.4f}'.format(est_cloud_trans[0] - obj_trans[0], est_cloud_trans[1] - obj_trans[1],
+                                                  est_cloud_trans[2] - obj_trans[2]))
+            print('--')
+
+            vis = o3d.visualization.Visualizer()
+            vis.create_window()
+
+            previous_pcd = copy.deepcopy(self.prev_cloud)
+            previous_pcd.paint_uniform_color([0.5, 0.5, 0.5])
+            vis.add_geometry(previous_pcd)
+
+            gt_pcd = o3d.geometry.PointCloud()
+            gt_pcd.points = o3d.utility.Vector3dVector(cloud_tfd)
+            gt_pcd.paint_uniform_color([0.0, 1.0, 0.0])
+            vis.add_geometry(gt_pcd)
+
+            est_pcd = o3d.geometry.PointCloud()
+            est_pcd.points = o3d.utility.Vector3dVector(est_cloud_tfd)
+            est_pcd.paint_uniform_color([0.0, 0.0, 1.0])
+            vis.add_geometry(est_pcd)
+
+            vis.run()
+            vis.destroy_window()
+            # Debug: End
+            '''
+
             return cloud_tfd, cam_pose, est_cloud_tfd, est_cam_pose
 
     def align_icp(self, cloud):
@@ -197,11 +235,10 @@ class TrajectoryVisualizer:
 
         source_pcd = o3d.geometry.PointCloud()
         source_pcd.points = o3d.utility.Vector3dVector(copy.deepcopy(cloud))
-        target_pcd = o3d.geometry.PointCloud()
-        target_pcd.points = o3d.utility.Vector3dVector(copy.deepcopy(self.prev_cloud))
+        target_pcd = copy.deepcopy(self.prev_cloud)
 
         #print("Initial alignment")
-        evaluation = o3d.registration.evaluate_registration(source_pcd, target_pcd, threshold, trans_init)
+        #evaluation = o3d.registration.evaluate_registration(source_pcd, target_pcd, threshold, trans_init)
         #print(evaluation)
 
         #print("Apply point-to-point ICP")
@@ -321,8 +358,8 @@ if __name__ == '__main__':
     args.visualize = True
     args.save = False
     args.use_gt = False
-    args.max_num = 50
-    args.skip = 1  # 100
+    args.max_num = 10
+    args.skip = 5  # 100
     args.mask_erosion_kernel = 5
     args.outlier_rm_nb_neighbors = 500
     args.outlier_rm_std_ratio = 0.001
