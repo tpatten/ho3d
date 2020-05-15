@@ -7,6 +7,7 @@ import cv2
 import open3d as o3d
 import copy
 import transforms3d as tf3d
+from enum import IntEnum
 
 
 HAND_MASK_DIR = 'hand'
@@ -14,6 +15,23 @@ OBJECT_MASK_DIR = 'object'
 HAND_MASK_VISIBLE_DIR = 'hand_vis'
 OBJECT_MASK_VISIBLE_DIR = 'object_vis'
 COORD_CHANGE_MAT = np.array([[1., 0., 0.], [0, -1., 0.], [0., 0., -1.]], dtype=np.float32)
+ICP_THRESH = 0.02
+RANSAC_THRESH = 0.015
+
+
+class ICPMethod(IntEnum):
+    Point2Point = 1
+    Point2Plane = 2
+
+
+class RegMethod(IntEnum):
+    GT = 1
+    ICP_PAIR = 2
+    ICP_FULL = 3
+    FPHF_ICP_PAIR = 4
+    FPFH_ICP_FULL = 5
+    FASTGLOB_ICP_PAIR = 6
+    FASTGLOB_ICP_FULL = 7
 
 
 class TrajectoryVisualizer:
@@ -68,12 +86,11 @@ class TrajectoryVisualizer:
             cloud, colors = self.image_to_world(mask, cut_z=np.linalg.norm(self.anno['objTrans'])*1.1)
 
             # Transform the cloud and get the camera position
-            # cloud, cam_pose = self.transform_to_object_frame(cloud)
             cloud, cam_pose, est_cloud, est_cam_pose = self.transform_to_object_frame(cloud)
 
             # Create the point cloud for visualization
             mask_pcd = o3d.geometry.PointCloud()
-            if self.args.use_gt:
+            if self.args.reg_method == RegMethod.GT:
                 mask_pcd.points = o3d.utility.Vector3dVector(cloud)
             else:
                 mask_pcd.points = o3d.utility.Vector3dVector(est_cloud)
@@ -95,10 +112,20 @@ class TrajectoryVisualizer:
             num_processed += 1
 
             # Update the previous cloud and pose
-            if self.prev_cloud is None:
-                self.prev_cloud = o3d.geometry.PointCloud()
-            self.prev_cloud.points = o3d.utility.Vector3dVector(cloud)
-            self.prev_pose = cam_pose
+            if self.args.reg_method == RegMethod.ICP_FULL or self.args.reg_method == RegMethod.FPFH_ICP_FULL or \
+                    self.args.reg_method == RegMethod.FASTGLOB_ICP_FULL:
+                if self.prev_cloud is None:
+                    self.prev_cloud = mask_pcd
+                else:
+                    self.prev_cloud.points.extend(mask_pcd.points)
+                    self.prev_cloud.colors.extend(mask_pcd.colors)
+            else:
+                self.prev_cloud = mask_pcd
+            self.prev_pose = est_cam_pose
+
+            # Down sample
+            if self.args.voxel_size > 0:
+                self.prev_cloud = o3d.geometry.voxel_down_sample(self.prev_cloud, self.args.voxel_size)
 
             # Exit if reached the limit
             if self.args.max_num > 0 and num_processed == self.args.max_num:
@@ -112,7 +139,7 @@ class TrajectoryVisualizer:
         # Visualize
         if self.args.visualize:
             scene_pcds = None
-            if self.args.use_gt:
+            if self.args.reg_method == RegMethod.GT:
                 self.visualize(cam_poses, mask_pcds, scene_pcds=scene_pcds)
             else:
                 self.visualize(est_cam_poses, mask_pcds, scene_pcds=scene_pcds, gt_poses=cam_poses)
@@ -175,13 +202,17 @@ class TrajectoryVisualizer:
         cam_pose[:3, :3] = rot_max
         cam_pose[:3, 3] = np.matmul(-obj_trans, np.linalg.inv(rot_max))
 
-        # print('obj_trans', obj_trans)
-        # print('t3', np.matmul(-cam_pose[0:3, 3], cam_pose[0:3, 0:3]))
-
-        if self.args.use_gt or self.prev_cloud is None:
+        if self.args.reg_method == RegMethod.GT or self.prev_cloud is None:
             return cloud_tfd, cam_pose, cloud_tfd, cam_pose
         else:
-            est_cam_pose = np.copy(self.align_icp(cloud))
+            # Down sample
+            source_cloud = o3d.geometry.PointCloud()
+            source_cloud.points = o3d.utility.Vector3dVector(cloud)
+            if self.args.voxel_size > 0:
+                source_cloud = o3d.geometry.voxel_down_sample(source_cloud, self.args.voxel_size)
+            # Perform registration
+            est_cam_pose = np.copy(self.register_new_cloud(source_cloud))
+            # Transform the cloud
             est_cloud_tfd = np.copy(cloud)
             est_cloud_trans = np.matmul(-est_cam_pose[0:3, 3], est_cam_pose[0:3, 0:3])
             est_cloud_tfd -= est_cloud_trans
@@ -190,6 +221,7 @@ class TrajectoryVisualizer:
             trans_gt = cam_pose[:3, 3]
             euler_est = tf3d.euler.mat2euler(est_cam_pose[:3, :3])
             trans_est = est_cam_pose[:3, 3]
+            print('Previous cloud size: {}'.format(np.asarray(self.prev_cloud.points).shape[0]))
             print('X {:.4f}\tY {:.4f}\tZ {:.4f}\tRx {:.4f}\tRy {:.4f}\tRz {:.4f}'.format(
                 abs(trans_gt[0] - trans_est[0]) * 100, abs(trans_gt[1] - trans_est[1]) * 100,
                 abs(trans_gt[2] - trans_est[2]) * 100,
@@ -229,27 +261,98 @@ class TrajectoryVisualizer:
 
             return cloud_tfd, cam_pose, est_cloud_tfd, est_cam_pose
 
-    def align_icp(self, cloud):
-        threshold = 0.02
-        trans_init = self.prev_pose
+    def register_new_cloud(self, cloud):
+        if self.args.reg_method == RegMethod.ICP_PAIR or self.args.reg_method == RegMethod.ICP_FULL:
+            return self.align_icp(cloud, self.prev_pose)
+        elif self.args.reg_method == RegMethod.FPHF_ICP_PAIR or self.args.reg_method == RegMethod.FPFH_ICP_FULL:
+            initial_transform = self.fpfh_registration(cloud)
+            return self.align_icp(cloud, initial_transform)
+        elif self.args.reg_method == RegMethod.FASTGLOB_ICP_PAIR or self.args.reg_method == RegMethod.FASTGLOB_ICP_FULL:
+            initial_transform = self.fast_global_registration(cloud)
+            return self.align_icp(cloud, initial_transform)
+        else:
+            print('Unrecognized registration method {}'.format(self.args.reg_method))
+            return None
 
-        source_pcd = o3d.geometry.PointCloud()
-        source_pcd.points = o3d.utility.Vector3dVector(copy.deepcopy(cloud))
-        target_pcd = copy.deepcopy(self.prev_cloud)
+    def align_icp(self, cloud, trans_init):
+        # Get the threshold
+        threshold = ICP_THRESH
+        #if self.args.voxel_size > 0:
+        #    threshold = self.args.voxel_size * 0.4
 
-        #print("Initial alignment")
-        #evaluation = o3d.registration.evaluate_registration(source_pcd, target_pcd, threshold, trans_init)
-        #print(evaluation)
-
-        #print("Apply point-to-point ICP")
-        reg_p2p = o3d.registration.registration_icp(source_pcd, target_pcd, threshold, trans_init,
-                                                    o3d.registration.TransformationEstimationPointToPoint())
-        #print(reg_p2p)
-        #print("Transformation is:")
-        #print(reg_p2p.transformation)
-        #print("")
+        # Perform ICP
+        if self.args.icp_method == ICPMethod.Point2Point:
+            reg_p2p = o3d.registration.registration_icp(cloud, self.prev_cloud, threshold, trans_init,
+                                                        o3d.registration.TransformationEstimationPointToPoint())
+        elif self.args.icp_method == ICPMethod.Point2Plane:
+            if not cloud.has_normals():
+                radius_normal = self.args.voxel_size * 2
+                o3d.geometry.estimate_normals(
+                    cloud,
+                    o3d.geometry.KDTreeSearchParamHybrid(radius=radius_normal, max_nn=30))
+            if not self.prev_cloud.has_normals():
+                radius_normal = self.args.voxel_size * 2
+                o3d.geometry.estimate_normals(
+                    self.prev_cloud,
+                    o3d.geometry.KDTreeSearchParamHybrid(radius=radius_normal, max_nn=30))
+            reg_p2p = o3d.registration.registration_icp(cloud, self.prev_cloud, threshold, trans_init,
+                                                        o3d.registration.TransformationEstimationPointToPlane())
+        else:
+            print('Unrecognized ICP method {}'.format(self.args.icp_method))
+            return None
 
         return reg_p2p.transformation
+
+    def fpfh_registration(self, cloud):
+        # Compute the FPFH features
+        fpfh_cloud = self.compute_fpfh(cloud)
+        fpfh_prev_cloud = self.compute_fpfh(self.prev_cloud)
+
+        # Get the distance threshold for RANSAC
+        distance_threshold = ICP_THRESH  # RANSAC_THRESH
+        #if self.args.voxel_size > 0:
+        #    distance_threshold = self.args.voxel_size * 1.5
+
+        # Align the clouds with RANSAC
+        result_ransac = o3d.registration.registration_ransac_based_on_feature_matching(
+            cloud, self.prev_cloud, fpfh_cloud, fpfh_prev_cloud, distance_threshold,
+            o3d.registration.TransformationEstimationPointToPoint(False), 4, [
+                o3d.registration.CorrespondenceCheckerBasedOnEdgeLength(0.9),
+                o3d.registration.CorrespondenceCheckerBasedOnDistance(
+                    distance_threshold)
+            ], o3d.registration.RANSACConvergenceCriteria(4000000, 500))
+
+        return result_ransac.transformation
+
+    def compute_fpfh(self, cloud):
+        radius_normal = self.args.voxel_size * 2
+        o3d.geometry.estimate_normals(
+            cloud,
+            o3d.geometry.KDTreeSearchParamHybrid(radius=radius_normal, max_nn=30))
+
+        radius_feature = self.args.voxel_size * 5
+        fpfh = o3d.registration.compute_fpfh_feature(
+            cloud,
+            o3d.geometry.KDTreeSearchParamHybrid(radius=radius_feature, max_nn=100))
+
+        return fpfh
+
+    def fast_global_registration(self, cloud):
+        # Compute the FPFH features
+        fpfh_cloud = self.compute_fpfh(cloud)
+        fpfh_prev_cloud = self.compute_fpfh(self.prev_cloud)
+
+        # Get the distance threshold for RANSAC
+        distance_threshold = ICP_THRESH  # RANSAC_THRESH
+        # if self.args.voxel_size > 0:
+        #    distance_threshold = self.args.voxel_size * 0.5
+
+        result_registration = o3d.registration.registration_fast_based_on_feature_matching(
+            cloud, self.prev_cloud, fpfh_cloud, fpfh_prev_cloud,
+            o3d.registration.FastGlobalRegistrationOption(
+                maximum_correspondence_distance=distance_threshold))
+
+        return result_registration.transformation
 
     def remove_outliers(self, cloud):
         if self.args.outlier_rm_nb_neighbors > 0 and self.args.outlier_rm_std_ratio > 0:
@@ -357,12 +460,18 @@ if __name__ == '__main__':
     args.scene = 'ABF10'
     args.visualize = True
     args.save = False
-    args.use_gt = False
-    args.max_num = 10
-    args.skip = 5  # 100
+    args.icp_method = ICPMethod.Point2Plane
+    # Point2Point=1, Point2Plane=2
+    args.reg_method = 2
+    # GT=1, ICP_PAIR=2, ICP_FULL=3, FPHF_ICP_PAIR=4, FPFH_ICP_FULL=5, FASTGLOB_ICP_PAIR=6, FASTGLOB_ICP_FULL=7
+    args.max_num = 20
+    args.skip = 10  # 100
     args.mask_erosion_kernel = 5
     args.outlier_rm_nb_neighbors = 500
     args.outlier_rm_std_ratio = 0.001
+    args.voxel_size = 0.001
 
     # Visualize the trajectory
     mask_extractor = TrajectoryVisualizer(args)
+
+    # X 12.1941	Y 34.1510	Z 16.4598	Rx 21.4639	Ry 4.1129	Rz 50.4426
