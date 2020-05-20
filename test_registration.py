@@ -380,8 +380,7 @@ def feature_registration(source, target, MIN_MATCH_COUNT=9):  #12
             dst_good.append(pt_d)
 
     # Get rigid transforms between two sets of feature points through RANSAC
-    transform = match_ransac(np.asarray(src_good), np.asarray(dst_good), tol=100)
-    print(np.asarray(transform).reshape((4, 4)))
+    transform = match_ransac(np.asarray(src_good), np.asarray(dst_good))
 
     if transform is None:
         print('RANSAC returned None')
@@ -390,6 +389,7 @@ def feature_registration(source, target, MIN_MATCH_COUNT=9):  #12
     #'''
     # Visualize the matches in 3D
     print('3D SIFT visualization')
+    print(np.asarray(transform).reshape((4, 4)))
 
     # Create visualizer
     vis = o3d.visualization.Visualizer()

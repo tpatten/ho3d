@@ -15,12 +15,14 @@ MODEL_PATH = '/v4rtemp/datasets/HandTracking/HO3D_v2/models/'
 
 def plot_points(vis, pcd, gripper_pcd, left_tip, right_tip, gripper_trans, gripper_mid_point, marker_radius):
     # Object point cloud
-    pcd.paint_uniform_color([0.5, 0.5, 0.5])
-    vis.add_geometry(pcd)
+    if pcd is not None:
+        pcd.paint_uniform_color([0.5, 0.5, 0.5])
+        vis.add_geometry(pcd)
 
     # Gripper cloud
-    gripper_pcd.paint_uniform_color([0.4, 0.8, 0.4])
-    vis.add_geometry(gripper_pcd)
+    if gripper_pcd is not None:
+        gripper_pcd.paint_uniform_color([0.4, 0.8, 0.4])
+        vis.add_geometry(gripper_pcd)
 
     # Finger tip points, mid point and center point
     endpoints = []
@@ -70,7 +72,7 @@ if __name__ == '__main__':
     # parse the arguments
     parser = argparse.ArgumentParser(description='HANDS19 - Task#3 HO-3D Visualize grasps')
     args = parser.parse_args()
-    args.file = '/home/tpatten/v4rtemp/datasets/HandTracking/HO3D_v2/train/MDF10/meta/0138.pkl'
+    args.file = '/home/tpatten/v4rtemp/datasets/HandTracking/HO3D_v2/train/ABF10/meta/0000.pkl'
     args.models_path = '/home/tpatten/v4rtemp/datasets/HandTracking/HO3D_v2/models'
     args.gripper_cloud_path = 'hand_open_new.pcd'
 
@@ -103,12 +105,10 @@ if __name__ == '__main__':
     gripper_transform_file = gripper_transform_file.replace("meta/", "meta/grasp_bl_")
     gripper_transform = load_pickle_data(gripper_transform_file)
     gripper_transform = gripper_transform.reshape(4, 4)
-    # print(gripper_transform)
-    # gripper_pcd.transform(gripper_transform)
     pts = np.asarray(gripper_pcd.points)
+
     pts = np.matmul(pts, np.linalg.inv(gripper_transform[:3, :3]))
     gripper_trans = gripper_transform[:3, 3]
-    # pts += gripper_trans
     gripper_pcd.points = o3d.utility.Vector3dVector(pts)
 
     # Estimate the roll and pitch
@@ -189,7 +189,7 @@ if __name__ == '__main__':
     vis.create_window()
 
     # Plot the coordinate frame
-    vis.add_geometry(o3d.create_mesh_coordinate_frame(size=0.5))
+    vis.add_geometry(o3d.create_mesh_coordinate_frame(size=0.25))
     # vis.add_geometry(o3d.create_mesh_coordinate_frame(size=0.05))
 
     # Plot original
