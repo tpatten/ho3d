@@ -63,14 +63,17 @@ class TrajectoryVisualizer:
         mask_pcds = []
         scene_pcds = []
         processed_frames = []
-        counter = 0
+        counter = self.args.start_frame
         num_processed = 0
         while counter < len(frame_ids):
             # Get the id
             frame_id = frame_ids[counter].split('.')[0]
             # Create the filename for the metadata file
             meta_filename = os.path.join(self.base_dir, self.data_split, self.args.scene, 'meta', str(frame_id) + '.pkl')
-            print('Processing file {}'.format(meta_filename))
+            if self.args.max_num == 0:
+                print('[{}/{}] Processing file {}'.format(counter, len(frame_ids), meta_filename))
+            else:
+                print('[{}/{}] Processing file {}'.format(num_processed, self.args.max_num, meta_filename))
 
             # Read image, depths maps and annotations
             self.rgb, self.depth, self.anno, scene_pcd = self.load_data(self.args.scene, frame_id)
@@ -78,6 +81,11 @@ class TrajectoryVisualizer:
             # Read the mask
             mask_filename = os.path.join(self.base_dir, self.data_split, self.args.scene, 'mask',
                                          OBJECT_MASK_VISIBLE_DIR, str(frame_id) + '.png')
+            if not os.path.exists(mask_filename):
+                print('No mask available for frame {}'.format(frame_id))
+                counter += self.args.skip
+                continue
+
             mask = cv2.imread(mask_filename)[:, :, 0]
             if self.erosion_kernel is not None:
                 mask = cv2.erode(mask, self.erosion_kernel, iterations=1)
@@ -175,7 +183,7 @@ class TrajectoryVisualizer:
             for u in range(self.rgb.shape[1]):
                 if mask is None or mask[v, u] > 0:
                     z = self.depth[v, u]
-                    if z < cut_z:
+                    if z > 0.001 and z < cut_z:
                         x = (u - cx) * z * i_fx
                         y = (v - cy) * z * i_fy
                         pts.append([x, y, z])
@@ -413,8 +421,7 @@ class TrajectoryVisualizer:
         vis.run()
         vis.destroy_window()
 
-    @staticmethod
-    def save_clouds_and_camera_poses(base_dir, frame_ids, cam_poses, est_cam_poses, mask_pcds):
+    def save_clouds_and_camera_poses(self, base_dir, frame_ids, cam_poses, est_cam_poses, mask_pcds):
         all_points = np.asarray(mask_pcds[0].points)
         all_colors = np.asarray(mask_pcds[0].colors)
         for i in range(1, len(mask_pcds)):
@@ -433,7 +440,10 @@ class TrajectoryVisualizer:
 
         points = np.asarray(down_pcd.points)
         normals = np.asarray(down_pcd.normals)
-        filename = os.path.join(base_dir, 'reconstruction.xyz')
+        filename = os.path.join(base_dir, str(self.args.reg_method).split('.')[1] +
+                                '_start' + str(self.args.start_frame) +
+                                '_max' + str(self.args.max_num) +
+                                '_skip' + str(self.args.skip) + '.xyz')
         f = open(filename, "w")
         for i in range(len(points)):
             f.write('{} {} {} {} {} {}\n'.format(points[i, 0], points[i, 1], points[i, 2],
@@ -459,13 +469,14 @@ if __name__ == '__main__':
     args.ho3d_path = '/home/tpatten/Data/Hands/HO3D/'
     args.scene = 'ABF10'
     args.visualize = True
-    args.save = False
+    args.save = True
     args.icp_method = ICPMethod.Point2Plane
     # Point2Point=1, Point2Plane=2
-    args.reg_method = 2
+    args.reg_method = RegMethod.ICP_PAIR
     # GT=1, ICP_PAIR=2, ICP_FULL=3, FPHF_ICP_PAIR=4, FPFH_ICP_FULL=5, FASTGLOB_ICP_PAIR=6, FASTGLOB_ICP_FULL=7
-    args.max_num = 20
-    args.skip = 10  # 100
+    args.start_frame = 0
+    args.max_num = 500  #50
+    args.skip = 2  # 100
     args.mask_erosion_kernel = 5
     args.outlier_rm_nb_neighbors = 500
     args.outlier_rm_std_ratio = 0.001
@@ -473,5 +484,3 @@ if __name__ == '__main__':
 
     # Visualize the trajectory
     mask_extractor = TrajectoryVisualizer(args)
-
-    # X 12.1941	Y 34.1510	Z 16.4598	Rx 21.4639	Ry 4.1129	Rz 50.4426
