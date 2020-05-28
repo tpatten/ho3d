@@ -92,6 +92,10 @@ class TrajectoryVisualizer:
 
             # Extract the masked point cloud
             cloud, colors = self.image_to_world(mask, cut_z=np.linalg.norm(self.anno['objTrans'])*1.1)
+            if cloud.shape[0] == 0:
+                print('Empty cloud for frame {}'.format(frame_id))
+                counter += self.args.skip
+                continue
 
             # Transform the cloud and get the camera position
             cloud, cam_pose, est_cloud, est_cam_pose = self.transform_to_object_frame(cloud)
@@ -467,12 +471,12 @@ if __name__ == '__main__':
     args = parser.parse_args()
     # args.ho3d_path = '/home/tpatten/v4rtemp/datasets/HandTracking/HO3D_v2/'
     args.ho3d_path = '/home/tpatten/Data/Hands/HO3D/'
-    args.scene = 'ABF10'
-    args.visualize = True
+    args.scene = 'ShSu10'
+    args.visualize = False
     args.save = True
     args.icp_method = ICPMethod.Point2Plane
     # Point2Point=1, Point2Plane=2
-    args.reg_method = RegMethod.ICP_PAIR
+    args.reg_method = RegMethod.GT
     # GT=1, ICP_PAIR=2, ICP_FULL=3, FPHF_ICP_PAIR=4, FPFH_ICP_FULL=5, FASTGLOB_ICP_PAIR=6, FASTGLOB_ICP_FULL=7
     args.start_frame = 0
     args.max_num = 500  #50
