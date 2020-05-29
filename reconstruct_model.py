@@ -34,7 +34,7 @@ class RegMethod(IntEnum):
     FASTGLOB_ICP_FULL = 7
 
 
-class TrajectoryVisualizer:
+class ModelReconstructor:
     def __init__(self, args):
         self.args = args
         self.base_dir = args.ho3d_path
@@ -50,10 +50,35 @@ class TrajectoryVisualizer:
         else:
             self.erosion_kernel = None
 
-        # Compute and visualize
-        self.visualize_trajectory()
+        # Reconstruct the model
+        if self.args.model_file == '':
+            self.reconstruct_object_model()
+        else:
+            loaded_pcd = self.load_object_model(self.args.model_file)
+            loaded_pcd = self.remove_outliers(loaded_pcd, outlier_rm_nb_neighbors=self.args.outlier_rm_nb_neighbors,
+                                              outlier_rm_std_ratio=self.args.outlier_rm_std_ratio * 0.0001,
+                                              raduis_rm_min_nb_points=self.args.raduis_rm_min_nb_points,
+                                              raduis_rm_radius=self.args.voxel_size * self.args.raduis_rm_radius_factor)
+            loaded_pcd = self.remove_outliers(loaded_pcd, outlier_rm_nb_neighbors=0., outlier_rm_std_ratio=0.,
+                                              raduis_rm_min_nb_points=1250,
+                                              raduis_rm_radius=self.args.voxel_size * 10)
+            self.visualize(mask_pcds=[loaded_pcd])
+            # self.visualize(mask_pcds=[self.load_object_model(self.args.model_file)])
 
-    def visualize_trajectory(self):
+            loaded_pcd = o3d.geometry.voxel_down_sample(loaded_pcd, 0.001)
+            o3d.geometry.estimate_normals(loaded_pcd,
+                                          search_param=o3d.geometry.KDTreeSearchParamHybrid(
+                                              radius=0.1, max_nn=30))
+            points = np.asarray(loaded_pcd.points)
+            normals = np.asarray(loaded_pcd.normals)
+            filename = self.args.model_file.split('.')[0] + '_clean.xyz'
+            f = open(filename, "w")
+            for i in range(len(points)):
+                f.write('{} {} {} {} {} {}\n'.format(points[i, 0], points[i, 1], points[i, 2],
+                                                     normals[i, 0], normals[i, 1], normals[i, 2]))
+            f.close()
+
+    def reconstruct_object_model(self):
         # Get the scene ids
         frame_ids = sorted(os.listdir(os.path.join(self.base_dir, self.data_split, self.args.scene, 'rgb')))
 
@@ -69,7 +94,8 @@ class TrajectoryVisualizer:
             # Get the id
             frame_id = frame_ids[counter].split('.')[0]
             # Create the filename for the metadata file
-            meta_filename = os.path.join(self.base_dir, self.data_split, self.args.scene, 'meta', str(frame_id) + '.pkl')
+            meta_filename = os.path.join(self.base_dir, self.data_split, self.args.scene, 'meta',
+                                         str(frame_id) + '.pkl')
             if self.args.max_num == 0:
                 print('[{}/{}] Processing file {}'.format(counter, len(frame_ids), meta_filename))
             else:
@@ -110,7 +136,14 @@ class TrajectoryVisualizer:
             # mask_pcd.transform([[1, 0, 0, 0], [0, -1, 0, 0], [0, 0, -1, 0], [0, 0, 0, 1]])
 
             # Remove outliers
-            mask_pcd = self.remove_outliers(mask_pcd)
+            #mask_pcd = self.remove_outliers(mask_pcd,
+            #                                outlier_rm_nb_neighbors=self.args.outlier_rm_nb_neighbors,
+            #                                outlier_rm_std_ratio=self.args.outlier_rm_std_ratio,
+            #                                raduis_rm_min_nb_points=self.args.raduis_rm_min_nb_points,
+            #                                raduis_rm_radius=self.args.voxel_size * self.args.raduis_rm_radius_factor)
+            mask_pcd = self.remove_outliers(mask_pcd,
+                                            outlier_rm_nb_neighbors=self.args.outlier_rm_nb_neighbors,
+                                            outlier_rm_std_ratio=self.args.outlier_rm_std_ratio)
 
             # Add to lists
             cam_poses.append(cam_pose)
@@ -142,6 +175,12 @@ class TrajectoryVisualizer:
             # Exit if reached the limit
             if self.args.max_num > 0 and num_processed == self.args.max_num:
                 break
+
+            # Save intermediate results
+            if self.args.save and self.args.save_intermediate and num_processed % 20 == 0:
+                base_dir = os.path.join(self.base_dir, self.data_split, self.args.scene)
+                self.save_clouds_and_camera_poses(base_dir, processed_frames, cam_poses, est_cam_poses, mask_pcds,
+                                                  frame_id=frame_id)
 
         # Save
         if self.args.save:
@@ -366,18 +405,26 @@ class TrajectoryVisualizer:
 
         return result_registration.transformation
 
-    def remove_outliers(self, cloud):
-        if self.args.outlier_rm_nb_neighbors > 0 and self.args.outlier_rm_std_ratio > 0:
-            _, ind = o3d.geometry.statistical_outlier_removal(cloud,
-                                                              nb_neighbors=self.args.outlier_rm_nb_neighbors,
-                                                              std_ratio=self.args.outlier_rm_std_ratio)
-            in_cloud = o3d.geometry.select_down_sample(cloud, ind)
-            return in_cloud
-        else:
-            return cloud
+    @staticmethod
+    def remove_outliers(cloud, outlier_rm_nb_neighbors=0., outlier_rm_std_ratio=0.,
+                        raduis_rm_min_nb_points=0, raduis_rm_radius=0.):
+        # Copy the input cloud
+        in_cloud = copy.deepcopy(cloud)
+
+        # Statistical outlier removal
+        if outlier_rm_nb_neighbors > 0 and outlier_rm_std_ratio > 0:
+            in_cloud, _ = o3d.geometry.statistical_outlier_removal(
+                in_cloud, nb_neighbors=outlier_rm_nb_neighbors, std_ratio=outlier_rm_std_ratio)
+
+        # Radius outlier removal
+        if raduis_rm_min_nb_points > 0 and raduis_rm_radius > 0:
+            in_cloud, _ = o3d.geometry.radius_outlier_removal(
+                in_cloud, nb_points=raduis_rm_min_nb_points, radius=raduis_rm_radius)
+
+        return in_cloud
 
     @staticmethod
-    def visualize(cam_poses, mask_pcds, scene_pcds=None, gt_poses=None):
+    def visualize(cam_poses=None, mask_pcds=None, scene_pcds=None, gt_poses=None):
         # Create visualizer
         vis = o3d.visualization.Visualizer()
         vis.create_window()
@@ -395,17 +442,18 @@ class TrajectoryVisualizer:
                 vis.add_geometry(s)
 
         # Plot camera pose
-        for m in cam_poses:
-            points = m[:3, :].T
-            points[0:3, :] *= 0.175
-            points[0:3, :] += np.tile(points[3, :], (3, 1))
-            lines = [[3, 0], [3, 1], [3, 2]]
-            line_colors = [[1., 0., 0.], [0., 1., 0.], [0., 0., 1.]]
-            line_set = o3d.geometry.LineSet()
-            line_set.points = o3d.utility.Vector3dVector(points)
-            line_set.lines = o3d.utility.Vector2iVector(lines)
-            line_set.colors = o3d.utility.Vector3dVector(line_colors)
-            vis.add_geometry(line_set)
+        if cam_poses is not None:
+            for m in cam_poses:
+                points = m[:3, :].T
+                points[0:3, :] *= 0.175
+                points[0:3, :] += np.tile(points[3, :], (3, 1))
+                lines = [[3, 0], [3, 1], [3, 2]]
+                line_colors = [[1., 0., 0.], [0., 1., 0.], [0., 0., 1.]]
+                line_set = o3d.geometry.LineSet()
+                line_set.points = o3d.utility.Vector3dVector(points)
+                line_set.lines = o3d.utility.Vector2iVector(lines)
+                line_set.colors = o3d.utility.Vector3dVector(line_colors)
+                vis.add_geometry(line_set)
 
         # Plot the ground truth camera poses
         if gt_poses is not None:
@@ -425,7 +473,7 @@ class TrajectoryVisualizer:
         vis.run()
         vis.destroy_window()
 
-    def save_clouds_and_camera_poses(self, base_dir, frame_ids, cam_poses, est_cam_poses, mask_pcds):
+    def save_clouds_and_camera_poses(self, base_dir, frame_ids, cam_poses, est_cam_poses, mask_pcds, frame_id=0):
         all_points = np.asarray(mask_pcds[0].points)
         all_colors = np.asarray(mask_pcds[0].colors)
         for i in range(1, len(mask_pcds)):
@@ -447,7 +495,10 @@ class TrajectoryVisualizer:
         filename = os.path.join(base_dir, str(self.args.reg_method).split('.')[1] +
                                 '_start' + str(self.args.start_frame) +
                                 '_max' + str(self.args.max_num) +
-                                '_skip' + str(self.args.skip) + '.xyz')
+                                '_skip' + str(self.args.skip))
+        if int(frame_id) > 0:
+            filename = filename + '_frame' + str(frame_id)
+        filename = filename + '.xyz'
         f = open(filename, "w")
         for i in range(len(points)):
             f.write('{} {} {} {} {} {}\n'.format(points[i, 0], points[i, 1], points[i, 2],
@@ -464,27 +515,39 @@ class TrajectoryVisualizer:
         vis.destroy_window()
         '''
 
+    @staticmethod
+    def load_object_model(filename):
+        print('Loading file {}'.format(filename))
+        pcd = o3d.geometry.PointCloud()
+        pts = np.loadtxt(filename)[:, :3]
+        pcd.points = o3d.utility.Vector3dVector(pts)
+        return pcd
+
 
 if __name__ == '__main__':
     # Parse the arguments
-    parser = argparse.ArgumentParser(description='HANDS19 - Task#3 HO-3D Camera trajectory visualization')
+    parser = argparse.ArgumentParser(description='HANDS19 - Task#3 HO-3D Object model reconstruction')
     args = parser.parse_args()
     # args.ho3d_path = '/home/tpatten/v4rtemp/datasets/HandTracking/HO3D_v2/'
+    args.model_file = ''  # '/home/tpatten/Data/Hands/HO3D/train/BB10/GT_start0_max500_skip2.xyz'
     args.ho3d_path = '/home/tpatten/Data/Hands/HO3D/'
-    args.scene = 'ShSu10'
-    args.visualize = False
-    args.save = True
+    args.scene = 'ABF10'
+    args.visualize = True
+    args.save = False
+    args.save_intermediate = False
     args.icp_method = ICPMethod.Point2Plane
     # Point2Point=1, Point2Plane=2
-    args.reg_method = RegMethod.GT
+    args.reg_method = RegMethod.ICP_PAIR
     # GT=1, ICP_PAIR=2, ICP_FULL=3, FPHF_ICP_PAIR=4, FPFH_ICP_FULL=5, FASTGLOB_ICP_PAIR=6, FASTGLOB_ICP_FULL=7
     args.start_frame = 0
-    args.max_num = 500  #50
-    args.skip = 2  # 100
+    args.max_num = 10
+    args.skip = 4
     args.mask_erosion_kernel = 5
     args.outlier_rm_nb_neighbors = 500
     args.outlier_rm_std_ratio = 0.001
+    args.raduis_rm_min_nb_points = 250
+    args.raduis_rm_radius_factor = 5
     args.voxel_size = 0.001
 
     # Visualize the trajectory
-    mask_extractor = TrajectoryVisualizer(args)
+    mask_extractor = ModelReconstructor(args)
