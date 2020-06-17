@@ -118,6 +118,9 @@ if __name__ == '__main__':
         objCorners = anno['objCorners3DRest']
         objCornersTrans = np.matmul(objCorners, cv2.Rodrigues(anno['objRot'])[0].T) + anno['objTrans']
 
+        #print('Rotation', anno['objRot'], anno['objRot'].shape)
+        #print('Translation', anno['objTrans'], anno['objTrans'].shape)
+
         # get the hand Mesh from MANO model for the current pose
         if split == 'train':
             handJoints3D, handMesh = forwardKinematics(anno['handPose'], anno['handTrans'], anno['handBeta'])
