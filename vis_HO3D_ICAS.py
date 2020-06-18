@@ -31,43 +31,24 @@ else:
     from mano.webuser.smpl_handpca_wrapper_HAND_only import load_model
 
 
-def splitall(path):
-    if path[-1] == '/':
-        path = path[:-1]
-    allparts = []
-    while 1:
-        parts = os.path.split(path)
-        if parts[0] == path:  # sentinel for absolute paths
-            allparts.insert(0, parts[0])
-            break
-        elif parts[1] == path: # sentinel for relative paths
-            allparts.insert(0, parts[1])
-            break
-        else:
-            path = parts[0]
-            allparts.insert(0, parts[1])
-    return allparts
-
-
 def read_icas_annotation(base_dir, file_id):
-    meta_filename = os.path.join(base_dir, 'object_pose', file_id + '.pkl')
-    pkl_data = load_pickle_data(meta_filename)
-    return pkl_data
-
-
-def ycbv_to_bop(id):
-    if id == '004_sugar_box':
-        return 'obj_000003'
-    elif id == '005_tomato_soup_can':
-        return 'obj_000004'
-    elif id == '006_mustard_bottle':
-        return 'obj_000005'
-    elif id == '025_mug':
-        return 'obj_000014'
-    elif id == '035_power_drill':
-        return 'obj_000015'
+    object_pose_filename = os.path.join(base_dir, 'object_pose', file_id + '.pkl')
+    if os.path.exists(object_pose_filename):
+        object_pose_data = load_pickle_data(object_pose_filename)
     else:
-        raise Exception('Name of model is unavailable %s' % id)
+        object_pose_data = None
+        print('No object pose file {}'.format(object_pose_filename))
+
+    hand_pose_filename = os.path.join(base_dir, 'hand_tracker', file_id + '.pkl')
+    if not os.path.exists(hand_pose_filename):
+        print('No hand pose file {}'.format(hand_pose_filename))
+        return object_pose_data
+
+    hand_pose_data = load_pickle_data(hand_pose_filename)
+    if object_pose_data is None:
+        return hand_pose_data
+
+    return {**object_pose_data, **hand_pose_data}
 
 
 def forwardKinematics(fullpose, trans, beta):
@@ -134,44 +115,34 @@ if __name__ == '__main__':
     camMat = np.array([538.391033533567, 0.0, 315.3074696331638,
                        0.0, 538.085452058436, 233.0483557773859,
                        0.0, 0.0, 1.0]).reshape((3,3))
-
-    # get the object name
-    objName = splitall(baseDir)[-2]
-    objName = ycbv_to_bop(objName)
+    if anno is None:
+        raise Exception('No annotations available')
 
     # get object 3D corner locations for the current pose
-    #objPts = np.loadtxt(os.path.join(YCBModelsDir, 'models', objName, 'points.xyz'))
-    #objCorners = get_3d_box_points(objPts)
-    pcd = o3d.read_point_cloud(os.path.join(YCBModelsDir, objName + '.ply'))
-    objCorners = get_3d_box_points(np.asarray(pcd.points))
-    objCornersTrans = np.matmul(objCorners, anno['objRot']) + anno['objTrans']
+    if 'objName' in anno and 'objRot' in anno and 'objTrans' in anno:
+        pcd = o3d.read_point_cloud(os.path.join(YCBModelsDir, anno['objName'] + '.ply'))
+        objCorners = get_3d_box_points(np.asarray(pcd.points))
+        objCornersTrans = np.matmul(objCorners, anno['objRot']) + anno['objTrans']
+        objKps = project_3D_points(camMat, objCornersTrans, is_OpenGL_coords=False)
+    else:
+        objKps = None
 
-    ## get the hand Mesh from MANO model for the current pose
-    #if split == 'train':
-    #    handJoints3D, handMesh = forwardKinematics(anno['handPose'], anno['handTrans'], anno['handBeta'])
-    #else:
-    #    handJoints3D = None
-
-    ## project to 2D
-    #if split == 'train':
-    #    handKps = project_3D_points(anno['camMat'], handJoints3D, is_OpenGL_coords=True)
-    #else:
-    #    # Only root joint available in evaluation split
-    #    handKps = project_3D_points(anno['camMat'], np.expand_dims(anno['handJoints3D'],0), is_OpenGL_coords=True)
-    objKps = project_3D_points(camMat, objCornersTrans, is_OpenGL_coords=False)
+    # get the hand joints
+    if 'handJoints3D' in anno:
+        handJoints3D = anno['handJoints3D']
+        handKps = project_3D_points(camMat, handJoints3D, is_OpenGL_coords=False)
+    else:
+        handKps = None
 
     # Visualize
     # draw 2D projections of annotations on RGB image
-    #if split == 'train':
-    #    imgAnno = showHandJoints(img, handKps[jointsMapManoToSimple])
-    #else:
-    #    # show only projection of root joint in evaluation split
-    #    imgAnno = showHandJoints(img, handKps)
-    #    # show the hand bounding box
-    #    imgAnno = show2DBoundingBox(imgAnno, anno['handBoundingBox'])
-    #imgAnno = showObjJoints(imgAnno, objKps, lineThickness=2)
-    imgAnno = copy.deepcopy(img)
-    imgAnno = showObjJoints(imgAnno, objKps, lineThickness=2)
+    if objKps is not None:
+        imgObject = copy.deepcopy(img)
+        imgObject = showObjJoints(imgObject, objKps, lineThickness=2)
+
+    if handKps is not None:
+        imHand = copy.deepcopy(img)
+        imHand = showHandJoints(imHand, handKps[jointsMapManoToSimple])
 
     # create matplotlib window
     fig = plt.figure(figsize=(2, 2))
@@ -188,15 +159,16 @@ if __name__ == '__main__':
     ax1.imshow(depth)
     ax1.title.set_text('Depth Map')
 
-    ## show 3D hand mesh
-    #ax2 = fig.add_subplot(2, 2, 3, projection="3d")
-    #if split=='train':
-    #    plot3dVisualize(ax2, handMesh, flip_x=False, isOpenGLCoords=True, c="r")
-    #ax2.title.set_text('Hand Mesh')
+    # show object pose
+    if objKps is not None:
+        ax2 = fig.add_subplot(2, 2, 3)
+        ax2.imshow(imgObject[:, :, [2, 1, 0]])
+        ax2.title.set_text('Object Pose')
 
-    # show 2D projections of annotations on RGB image
-    ax3 = fig.add_subplot(2, 2, 4)
-    ax3.imshow(imgAnno[:, :, [2, 1, 0]])
-    ax3.title.set_text('3D Annotations projected to 2D')
+    # show hand pose
+    if handKps is not None:
+        ax3 = fig.add_subplot(2, 2, 4)
+        ax3.imshow(imHand[:, :, [2, 1, 0]])
+        ax3.title.set_text('Hand Pose')
 
     plt.show()
