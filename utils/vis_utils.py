@@ -173,6 +173,38 @@ def showObjJoints(imgIn, gtIn, estIn=None, filename=None, upscale=1, lineThickne
 
     return img
 
+def draw_3d_poses(img, obj_box, tf, camK):
+    lines = [[0, 1], [0, 2], [0, 4], [1, 5], [1, 3], [2, 6], [2, 3], [3, 7],
+             [4, 6], [4, 5], [5, 7], [6, 7]]
+    direc = [2, 1, 0, 0, 1, 0, 2, 0, 1, 2, 1, 2]
+    proj_2d = np.zeros((8, 2), dtype=np.int)
+    tf_pts = (np.matmul(tf[:3, :3], obj_box.T) + tf[:3, 3, np.newaxis]).T
+    max_z = np.max(tf_pts[:, 2])
+    min_z = np.min(tf_pts[:, 2])
+    z_diff = max_z - min_z
+    z_mean = (max_z + min_z) / 2
+    proj_2d[:, 0] = tf_pts[:, 0] / tf_pts[:, 2] * camK[0, 0] + camK[0, 2]
+    proj_2d[:, 1] = tf_pts[:, 1] / tf_pts[:, 2] * camK[1, 1] + camK[1, 2]
+    for l_id in range(len(lines)):
+        line = lines[l_id]
+        dr = direc[l_id]
+        mean_z_line = (tf_pts[line[0], 2] + tf_pts[line[1], 2]) / 2
+        color_amp = (z_mean - mean_z_line) / z_diff * 255
+        color = np.zeros((3, ), dtype=np.uint8)
+        color[dr] = min(128 + color_amp, 255)
+        if color[dr] < 10:
+            continue
+        cv2.line(img, (proj_2d[line[0], 0], proj_2d[line[0], 1]),
+                 (proj_2d[line[1], 0], proj_2d[line[1], 1]),
+                 (int(color[0]), int(color[1]), int(color[2])), 2)
+
+    pt_colors = [[255, 255, 255], [255, 0, 0], [0, 255, 0], [0, 0, 255]]
+    for pt_id, color in zip([0, 4, 2, 1], pt_colors):  # origin, x,y,z, points
+        pt = proj_2d[pt_id]
+        cv2.circle(img, (int(pt[0]), int(pt[1])), 1, (color[0], color[1], color[2]), 5)
+    return img
+
+
 def cam_equal_aspect_3d(ax, verts, flip_x=False):
     """
     Centers view on cuboid containing hand and flips y and z axis

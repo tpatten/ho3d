@@ -120,10 +120,14 @@ if __name__ == '__main__':
 
     # get object 3D corner locations for the current pose
     if 'objName' in anno and 'objRot' in anno and 'objTrans' in anno:
+        print('Loading object points {}'.format(anno['objName']))
         pcd = o3d.read_point_cloud(os.path.join(YCBModelsDir, anno['objName'] + '.ply'))
         objCorners = get_3d_box_points(np.asarray(pcd.points))
         objCornersTrans = np.matmul(objCorners, anno['objRot']) + anno['objTrans']
         objKps = project_3D_points(camMat, objCornersTrans, is_OpenGL_coords=False)
+        objTF = np.eye(4)
+        objTF[:3, :3] = anno['objRot']
+        objTF[:3, 3] = anno['objTrans']
     else:
         objKps = None
 
@@ -138,7 +142,8 @@ if __name__ == '__main__':
     # draw 2D projections of annotations on RGB image
     if objKps is not None:
         imgObject = copy.deepcopy(img)
-        imgObject = showObjJoints(imgObject, objKps, lineThickness=2)
+        #imgObject = showObjJoints(imgObject, objKps, lineThickness=2)
+        draw_3d_poses(imgObject, objCorners, objTF, camMat)
 
     if handKps is not None:
         imHand = copy.deepcopy(img)
