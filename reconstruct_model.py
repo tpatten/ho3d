@@ -26,13 +26,13 @@ class ICPMethod(IntEnum):
 
 class RegMethod(IntEnum):
     GT = 1
-    #GT_ICP = 2
-    ICP_PAIR = 2
-    ICP_FULL = 3
-    FPHF_ICP_PAIR = 4
-    FPFH_ICP_FULL = 5
-    FASTGLOB_ICP_PAIR = 6
-    FASTGLOB_ICP_FULL = 7
+    GT_ICP = 2
+    ICP_PAIR = 3
+    ICP_FULL = 4
+    FPHF_ICP_PAIR = 5
+    FPFH_ICP_FULL = 6
+    FASTGLOB_ICP_PAIR = 7
+    FASTGLOB_ICP_FULL = 8
 
 
 class ModelReconstructor:
@@ -275,7 +275,8 @@ class ModelReconstructor:
             if self.args.voxel_size > 0:
                 source_cloud = o3d.geometry.voxel_down_sample(source_cloud, self.args.voxel_size)
             # Perform registration
-            est_cam_pose = np.copy(self.register_new_cloud(source_cloud))
+            est_cam_pose = np.copy(self.register_new_cloud(source_cloud,
+                                                           self.get_initial_transform(source_cloud, cam_pose)))
             # Transform the cloud
             est_cloud_tfd = np.copy(cloud)
             est_cloud_trans = np.matmul(-est_cam_pose[0:3, 3], est_cam_pose[0:3, 0:3])
@@ -285,7 +286,6 @@ class ModelReconstructor:
             trans_gt = cam_pose[:3, 3]
             euler_est = tf3d.euler.mat2euler(est_cam_pose[:3, :3])
             trans_est = est_cam_pose[:3, 3]
-            print('Previous cloud size: {}'.format(np.asarray(self.prev_cloud.points).shape[0]))
             print('X {:.4f}\tY {:.4f}\tZ {:.4f}\tRx {:.4f}\tRy {:.4f}\tRz {:.4f}'.format(
                 abs(trans_gt[0] - trans_est[0]) * 100, abs(trans_gt[1] - trans_est[1]) * 100,
                 abs(trans_gt[2] - trans_est[2]) * 100,
@@ -325,18 +325,23 @@ class ModelReconstructor:
 
             return cloud_tfd, cam_pose, est_cloud_tfd, est_cam_pose
 
-    def register_new_cloud(self, cloud):
-        if self.args.reg_method == RegMethod.ICP_PAIR or self.args.reg_method == RegMethod.ICP_FULL:
-            return self.align_icp(cloud, self.prev_pose)
+    def get_initial_transform(self, cloud, cam_pose):
+        initial_transform = np.eye(4)
+        if self.args.reg_method == RegMethod.GT_ICP:
+            initial_transform = cam_pose
+        elif self.args.reg_method == RegMethod.ICP_PAIR or self.args.reg_method == RegMethod.ICP_FULL:
+            initial_transform = self.prev_pose
         elif self.args.reg_method == RegMethod.FPHF_ICP_PAIR or self.args.reg_method == RegMethod.FPFH_ICP_FULL:
             initial_transform = self.fpfh_registration(cloud)
-            return self.align_icp(cloud, initial_transform)
         elif self.args.reg_method == RegMethod.FASTGLOB_ICP_PAIR or self.args.reg_method == RegMethod.FASTGLOB_ICP_FULL:
             initial_transform = self.fast_global_registration(cloud)
-            return self.align_icp(cloud, initial_transform)
         else:
-            print('Unrecognized registration method {}'.format(self.args.reg_method))
-            return None
+            print('Unrecognized registration method {}\nInitial transform is identity matrix'.format(
+                self.args.reg_method))
+        return initial_transform
+
+    def register_new_cloud(self, cloud, initial_transform):
+        return self.align_icp(cloud, initial_transform)
 
     def align_icp(self, cloud, trans_init):
         # Get the threshold
@@ -576,10 +581,10 @@ if __name__ == '__main__':
     args.save_intermediate = False
     args.icp_method = ICPMethod.Point2Plane
     # Point2Point=1, Point2Plane=2
-    args.reg_method = RegMethod.GT
-    # GT=1, ICP_PAIR=2, ICP_FULL=3, FPHF_ICP_PAIR=4, FPFH_ICP_FULL=5, FASTGLOB_ICP_PAIR=6, FASTGLOB_ICP_FULL=7
+    args.reg_method = RegMethod.GT_ICP
+    # GT=1, GT_ICP=2, ICP_PAIR=3, ICP_FULL=4, FPHF_ICP_PAIR=5, FPFH_ICP_FULL=6, FASTGLOB_ICP_PAIR=7, FASTGLOB_ICP_FULL=8
     args.start_frame = 0
-    args.max_num = 500
+    args.max_num = 15
     args.skip = 16
     args.mask_erosion_kernel = 5
     args.outlier_rm_nb_neighbors = 500
