@@ -1,6 +1,6 @@
 import pickle
 
-filename = '/home/tpatten/v4rtemp/datasets/HandTracking/HO3D_v2/train/ABF11/meta/0000.pkl'
+filename = '/home/tpatten/Data/Hands/HO3D/train/ABF10/meta/0000.pkl'
 with open(filename, 'rb') as f:
     try:
         in_data = pickle.load(f, encoding='latin1')

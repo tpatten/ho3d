@@ -17,7 +17,7 @@ if __name__ == '__main__':
     args.ho3d_path = '/home/tpatten/Data/Hands/HO3D/'
     args.subject_name = ['ABF', 'BB', 'GPMF', 'GSF', 'MDF', 'ShSu']
     args.save_dir = 'splits_new'
-    args.generation_mode = LOO_CODE
+    args.generation_mode = ALL_CODE
     args.balance_sets = True
     args.test_proportion = 0.2
     args.reject_grasp_fails = False
@@ -36,7 +36,7 @@ if __name__ == '__main__':
         save_dir = join(args.ho3d_path, args.save_dir)
         if isdir(save_dir):
             print('Save directory {} already exists!'.format(save_dir))
-            sys.exit(0)
+            #sys.exit(0)
         try:
             makedirs(save_dir)
         except OSError:
@@ -204,14 +204,18 @@ if __name__ == '__main__':
                                                                   len(train_samples),
                                                                   float(len(train_samples)) / num_files_for_selection))
 
+        # Shuffle
+        random.shuffle(train_samples)
+        random.shuffle(test_samples)
+
         # Write the splits to file
         if args.save:
-            train_file = join(args.ho3d_path, args.save_dir, 'all_grasp_train.txt')
+            train_file = join(args.ho3d_path, args.save_dir, 'ALL_grasp_train.txt')
             f = open(train_file, "w")
             for s in train_samples:
                 f.write("{}\n".format(s))
             f.close()
-            test_file = join(args.ho3d_path, args.save_dir, 'all_grasp_test.txt')
+            test_file = join(args.ho3d_path, args.save_dir, 'ALL_grasp_test.txt')
             f = open(test_file, "w")
             for s in test_samples:
                 f.write("{}\n".format(s))

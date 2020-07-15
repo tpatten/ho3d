@@ -176,4 +176,11 @@ if __name__ == '__main__':
         ax3.imshow(imHand[:, :, [2, 1, 0]])
         ax3.title.set_text('Hand Pose')
 
+        imHandObject = copy.deepcopy(imHand)
+        draw_3d_poses(imHandObject, objCorners, objTF, camMat)
+        #import scipy.misc
+        #scipy.misc.toimage(imHandObject, cmin=0.0, cmax=...).save('/home/tpatten/hand_object_est.png')
+        import matplotlib
+        matplotlib.image.imsave('/home/tpatten/hand_object_est.png', imHandObject[:, :, [2, 1, 0]])
+
     plt.show()
