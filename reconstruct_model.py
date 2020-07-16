@@ -569,7 +569,7 @@ class ModelReconstructor:
 
 if __name__ == '__main__':
     # Parse the arguments
-    parser = argparse.ArgumentParser(description='HANDS19 - Task#3 HO-3D Object model reconstruction')
+    parser = argparse.ArgumentParser(description='HO-3D Object model reconstruction')
     args = parser.parse_args()
     # args.ho3d_path = '/home/tpatten/v4rtemp/datasets/HandTracking/HO3D_v2/'
     args.model_file = ''  # '/home/tpatten/Data/Hands/HO3D/train/BB10/GT_start0_max500_skip2.xyz'
@@ -594,4 +594,4 @@ if __name__ == '__main__':
     args.voxel_size = 0.001
 
     # Visualize the trajectory
-    mask_extractor = ModelReconstructor(args)
+    reconstructor = ModelReconstructor(args)
