@@ -139,8 +139,9 @@ if __name__ == '__main__':
     # Parse the arguments
     parser = argparse.ArgumentParser(description='Masked image generator for use in the ORB SLAM pipeline')
     args = parser.parse_args()
-    args.ho3d_path = '/home/tpatten/Data/Hands/HO3D/'
-    args.scene = 'ABF10'
+    #args.ho3d_path = '/home/tpatten/Data/Hands/HO3D/'
+    args.ho3d_path = '/v4rtemp/datasets/HandTracking/HO3D_v2/'
+    args.scene = 'GPMF14'
     args.visualize = False
     args.save = True
     args.mask_erosion_kernel = 5
