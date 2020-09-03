@@ -3,7 +3,7 @@
 
 import argparse
 from utils.grasp_utils import *
-from mano.webuser.smpl_handpca_wrapper_HAND_only import load_model
+#from mano.webuser.smpl_handpca_wrapper_HAND_only import load_model
 import cv2
 import open3d as o3d
 import matplotlib.pyplot as plt
@@ -32,7 +32,7 @@ class MaskExtractor:
         self.depth = None
         self.anno = None
         self.scene_kd_tree = None
-        self.mano_model = load_model(MANO_MODEL_PATH, ncomps=6, flat_hand_mean=True)
+        #self.mano_model = load_model(MANO_MODEL_PATH, ncomps=6, flat_hand_mean=True)
 
         self.compute_masks()
 
@@ -69,6 +69,7 @@ class MaskExtractor:
                 print('=====>')
                 # Read image, depths maps and annotations
                 self.rgb, self.depth, self.anno, self.scene_kd_tree = self.load_data(d, frame_id)
+                print(self.rgb.shape)
 
                 # Get hand and object meshes
                 print('getting meshes...')
@@ -323,9 +324,9 @@ if __name__ == '__main__':
     # parse the arguments
     parser = argparse.ArgumentParser(description='HANDS19 - Task#3 HO-3D Object and hand mask extraction')
     args = parser.parse_args()
-    args.ho3d_path = '/home/tpatten/v4rtemp/datasets/HandTracking/HO3D_v2/'
-    args.models_path = '/home/tpatten/v4rtemp/datasets/HandTracking/HO3D_v2/models'
-    args.visualize = False
-    args.save = True
+    args.ho3d_path = '/home/tpatten/Data/Hands/HO3D_V2/HO3D_v2'
+    args.models_path = '/home/tpatten/Data/Hands/HO3D_V2/HO3D_v2/models'
+    args.visualize = True
+    args.save = False
 
     mask_extractor = MaskExtractor(args)
