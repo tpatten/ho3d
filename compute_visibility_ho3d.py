@@ -6,6 +6,7 @@ from utils.vis_utils import *
 import matplotlib.pyplot as plt
 import json
 
+
 DATA_SPLIT = 'evaluation'
 VALID_VAL = 255
 MORPH_CLOSE = False
@@ -13,13 +14,11 @@ IMAGE_WIDTH = 640
 IMAGE_HEIGHT = 480
 
 
-class MaskExtractor:
+class VisibilityRatioExtractor:
     def __init__(self, args):
         self.base_dir = args.ho3d_path
         self.models_path = args.models_path
         self.rgb = None
-        self.depth = None
-        self.anno = None
         self.do_visualize = args.visualize
         self.save_filename = args.save_filename
 
@@ -53,15 +52,15 @@ class MaskExtractor:
                 print('=====>')
 
                 # Read image, depths maps and annotations
-                self.anno, seg_mask = self.load_data(os.path.join(self.base_dir, DATA_SPLIT, d), frame_id)
+                anno, seg_mask = self.load_data(os.path.join(self.base_dir, DATA_SPLIT, d), frame_id)
 
                 # Get hand and object meshes
                 print('getting mesh...')
-                object_mesh = self.get_object_mesh()
+                object_mesh = self.get_object_mesh(anno)
 
                 # Get object mask
                 print('getting masks...')
-                object_mask = self.get_mask([object_mesh.v, object_mesh.f])
+                object_mask = self.get_mask(anno, [object_mesh.v, object_mesh.f])
                 object_mask = cv2.resize(object_mask, (int(IMAGE_WIDTH/2), int(IMAGE_HEIGHT/2)),
                                          interpolation=cv2.INTER_NEAREST)
                 kernel = np.ones((5, 5), np.uint8)
@@ -121,14 +120,14 @@ class MaskExtractor:
 
         return anno, mask
 
-    def get_object_mesh(self):
-        object_mesh = read_obj(os.path.join(self.models_path, self.anno['objName'], 'textured_simple.obj'))
-        object_mesh.v = np.matmul(object_mesh.v, cv2.Rodrigues(self.anno['objRot'])[0].T) + self.anno['objTrans']
+    def get_object_mesh(self, anno):
+        object_mesh = read_obj(os.path.join(self.models_path, anno['objName'], 'textured_simple.obj'))
+        object_mesh.v = np.matmul(object_mesh.v, cv2.Rodrigues(anno['objRot'])[0].T) + anno['objTrans']
         return object_mesh
 
-    def get_mask(self, mesh):
+    def get_mask(self, anno, mesh):
         # Get the uv coordinates
-        mesh_uv = projectPoints(mesh[0], self.anno['camMat'])
+        mesh_uv = projectPoints(mesh[0], anno['camMat'])
 
         # Generate mask by filling in the faces
         mask = np.zeros((IMAGE_HEIGHT, IMAGE_WIDTH))
@@ -182,4 +181,4 @@ if __name__ == '__main__':
     args.save_filename = '/home/tpatten/Data/visibility_ratios.json'
     args.visualize = False
 
-    mask_extractor = MaskExtractor(args)
+    vre = VisibilityRatioExtractor(args)
