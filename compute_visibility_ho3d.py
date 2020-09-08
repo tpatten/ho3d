@@ -197,7 +197,7 @@ if __name__ == '__main__':
     parser.add_argument("-seg_path", required=False, type=str,
                         help="Path to the segmentation mask directory, if not provided then it will search in the ho3d_path")
     parser.add_argument("-save_filename", required=False, type=str, help="Filename of the saved visibility ratios",
-                        default="visibility_ratios.json")
+                        default="./visibility_ratios.json")
     parser.add_argument("--visualize", action="store_true", help="Visualize masks")
     args = parser.parse_args()
 
