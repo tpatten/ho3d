@@ -4,12 +4,11 @@
 import argparse
 from utils.vis_utils import *
 import matplotlib.pyplot as plt
+import copy
 import json
 
 
-DATA_SPLIT = 'evaluation'
 VALID_VAL = 255
-MORPH_CLOSE = False
 IMAGE_WIDTH = 640
 IMAGE_HEIGHT = 480
 
@@ -17,22 +16,27 @@ IMAGE_HEIGHT = 480
 class VisibilityRatioExtractor:
     def __init__(self, args):
         self.base_dir = args.ho3d_path
+        self.data_split = args.split
+        self.seg_path = args.seg_path
         self.models_path = args.models_path
         self.rgb = None
+        self.obj_name = None
+        self.object_mesh = None
         self.do_visualize = args.visualize
         self.save_filename = args.save_filename
 
+        # Compute the masks
         self.compute_masks()
 
     def compute_masks(self):
         # Get all directories
-        dirs = os.listdir(os.path.join(self.base_dir, DATA_SPLIT))
+        dirs = os.listdir(os.path.join(self.base_dir, self.data_split))
 
         # For each directory in the split
         dict = {}
         for d in dirs:
             # Check if segmentation available
-            if not os.path.exists(os.path.join(self.base_dir, DATA_SPLIT, d, 'seg')):
+            if not os.path.exists(os.path.join(self.base_dir, self.data_split, d, 'seg')):
                 print('Segmentations unavailable for {}'.format(d))
                 continue
 
@@ -40,31 +44,29 @@ class VisibilityRatioExtractor:
             dict[d] = []
 
             # Get the frame ids
-            frame_ids = sorted(os.listdir(os.path.join(self.base_dir, DATA_SPLIT, d, 'rgb')))
+            frame_ids = sorted(os.listdir(os.path.join(self.base_dir, self.data_split, d, 'rgb')))
 
             # For each frame in the directory
             for fid in frame_ids:
                 # Get the id
                 frame_id = fid.split('.')[0]
+                print('=====>')
                 print('Processing file {}'.format(frame_id))
 
-                # Begin processing
-                print('=====>')
-
                 # Read image, depths maps and annotations
-                anno, seg_mask = self.load_data(os.path.join(self.base_dir, DATA_SPLIT, d), frame_id)
+                anno, seg_mask = self.load_data(os.path.join(self.base_dir, self.data_split, d),
+                                                os.path.join(self.seg_path, d), frame_id)
 
                 # Get hand and object meshes
-                print('getting mesh...')
                 object_mesh = self.get_object_mesh(anno)
 
                 # Get object mask
-                print('getting masks...')
                 object_mask = self.get_mask(anno, [object_mesh.v, object_mesh.f])
                 object_mask = cv2.resize(object_mask, (int(IMAGE_WIDTH/2), int(IMAGE_HEIGHT/2)),
                                          interpolation=cv2.INTER_NEAREST)
                 kernel = np.ones((5, 5), np.uint8)
                 object_mask = cv2.erode(object_mask, kernel, iterations=1)
+
                 # Get occluded pixels
                 occluded_object_mask = self.subtract_mask(object_mask, seg_mask)
 
@@ -75,7 +77,7 @@ class VisibilityRatioExtractor:
                 print('Visibility {}'.format(visibility_ratio))
 
                 # Add data to dictionary
-                dict[d].append({frame_id: visibility_ratio})
+                dict[d].append((frame_id, visibility_ratio))
 
                 # Visualize
                 if self.do_visualize:
@@ -85,11 +87,8 @@ class VisibilityRatioExtractor:
                 with open(self.save_filename, 'w') as outfile:
                     json.dump(dict, outfile)
 
-                #sys.exit(0)
-
     @staticmethod
     def read_annotation(f_name):
-        """ Loads the pickle data """
         if not os.path.exists(f_name):
             raise Exception('Unable to find annotations pickle file at %s. Aborting.' % f_name)
         with open(f_name, 'rb') as f:
@@ -100,16 +99,15 @@ class VisibilityRatioExtractor:
 
         return pickle_data
 
-    def load_data(self, base_dir, frame_id):
+    def load_data(self, base_dir, seg_dir, frame_id):
         # Load the annotation
         meta_filename = os.path.join(base_dir, 'meta', str(frame_id) + '.pkl')
         anno = self.read_annotation(meta_filename)
 
         # Load the mask file
-        mask_filename = os.path.join(base_dir, 'seg', str(frame_id) + '.jpg')
+        mask_filename = os.path.join(seg_dir, 'seg', str(frame_id) + '.jpg')
         mask_rgb = cv2.imread(mask_filename)
         # Resize image to original size
-        #mask_rgb = cv2.resize(mask_rgb, (IMAGE_WIDTH, IMAGE_HEIGHT), interpolation=cv2.INTER_NEAREST)
         mask = np.zeros((mask_rgb.shape[0], mask_rgb.shape[1]))
 
         # Generate binary mask
@@ -121,11 +119,20 @@ class VisibilityRatioExtractor:
         return anno, mask
 
     def get_object_mesh(self, anno):
-        object_mesh = read_obj(os.path.join(self.models_path, anno['objName'], 'textured_simple.obj'))
+        # Load a new mesh if current mesh is None or different
+        if self.obj_name is None or self.obj_name != anno['objName']:
+            print('Loading new object mesh {}'.format(anno['objName']))
+            self.object_mesh = read_obj(os.path.join(self.models_path, anno['objName'], 'textured_simple.obj'))
+            self.obj_name = anno['objName']
+        object_mesh = copy.deepcopy(self.object_mesh)
+
+        # Transform the mesh
         object_mesh.v = np.matmul(object_mesh.v, cv2.Rodrigues(anno['objRot'])[0].T) + anno['objTrans']
+
         return object_mesh
 
-    def get_mask(self, anno, mesh):
+    @staticmethod
+    def get_mask(anno, mesh):
         # Get the uv coordinates
         mesh_uv = projectPoints(mesh[0], anno['camMat'])
 
@@ -141,15 +148,21 @@ class VisibilityRatioExtractor:
 
     @staticmethod
     def subtract_mask(mask_a, mask_b):
-        mask_s = np.copy(mask_a)
-        for u in range(mask_a.shape[0]):
-            for v in range(mask_a.shape[1]):
-                if mask_a[u, v] == VALID_VAL:
-                    if mask_b[u, v] == VALID_VAL:
-                        mask_s[u, v] = 0
+        # Compute the indices that are valid in both masks
+        valid_idx = set(np.where(mask_a.flatten() == VALID_VAL)[0]) & set(np.where(mask_b.flatten() == VALID_VAL)[0])
+
+        # Set the valid indices to 0
+        mask_s = np.copy(mask_a).flatten()
+        for v in valid_idx:
+            mask_s[v] = 0
+
+        # Reshape back to input shape
+        mask_s = mask_s.reshape(mask_a.shape)
+
         return mask_s
 
-    def visualize(self, mask, seg_mask, occluded_mask):
+    @staticmethod
+    def visualize(mask, seg_mask, occluded_mask):
         # Create window
         fig = plt.figure(figsize=(2, 5))
         fig_manager = plt.get_current_fig_manager()
@@ -173,12 +186,22 @@ class VisibilityRatioExtractor:
 
 
 if __name__ == '__main__':
-    # parse the arguments
-    parser = argparse.ArgumentParser(description='HO3D object visibility ratio extractor')
+    # Parse the arguments
+    # Example:
+    # python3 compute_visibility_ho3d.py '/home/tpatten/Data/Hands/HO3D_V2/HO3D_v2/' '/home/tpatten/Data/Hands/HO3D_V2/HO3D_v2/models' -split evaluation -save_filename /home/tpatten/Data/visibility_ratios.json
+    parser = argparse.ArgumentParser(description="HO3D object visibility ratio extractor")
+    parser.add_argument("ho3d_path", type=str, help="Path to HO3D dataset")
+    parser.add_argument("models_path", type=str, help="Path to ycb models directory")
+    parser.add_argument("-split", required=False, type=str,
+                        help="split type", choices=['train', 'evaluation'], default='evaluation')
+    parser.add_argument("-seg_path", required=False, type=str,
+                        help="Path to the segmentation mask directory, if not provided then it will search in the ho3d_path")
+    parser.add_argument("-save_filename", required=False, type=str, help="Filename of the saved visibility ratios",
+                        default="visibility_ratios.json")
+    parser.add_argument("--visualize", action="store_true", help="Visualize masks")
     args = parser.parse_args()
-    args.ho3d_path = '/home/tpatten/Data/Hands/HO3D_V2/HO3D_v2/'
-    args.models_path = '/home/tpatten/Data/Hands/HO3D_V2/HO3D_v2/models'
-    args.save_filename = '/home/tpatten/Data/visibility_ratios.json'
-    args.visualize = False
+
+    if args.seg_path is None:
+        args.seg_path = os.path.join(args.ho3d_path, args.split)
 
     vre = VisibilityRatioExtractor(args)
