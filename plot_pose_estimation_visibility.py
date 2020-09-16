@@ -51,7 +51,7 @@ class PE_VisRatio_Plotter:
         im_ids, vis_ratios = self.load_visibility_ratios(args.vis_ratio_file, ho3d_seq)
 
         # Get the pose estimates for each metric
-        pose_estimates = self.load_pose_estimation(args.pose_estimation_dir, args.seq_id, args.error_metric)
+        pose_estimates = self.load_pose_estimation(args.pose_estimation_dir, args.seq_id)
 
         # Arrange the pose estimates for each frame
         corr_coeffs = []
@@ -76,7 +76,8 @@ class PE_VisRatio_Plotter:
             corr_coeffs.append(r[0, 1])
 
         # Plot the visibility ratios
-        self.plot_data(im_ids, vis_ratios, pose_estimates, corr_coeffs)
+        figure_title = args.pose_estimation_dir[args.pose_estimation_dir.rfind("/") + 1:]
+        self.plot_data(im_ids, vis_ratios_normalized, pose_estimates, corr_coeffs, figure_title)
 
     @staticmethod
     def load_visibility_ratios(filename, seq_id):
@@ -92,49 +93,8 @@ class PE_VisRatio_Plotter:
             # Return
             return im_ids, vis_ratios
 
-    '''
     @staticmethod
-    def load_pose_estimation(pe_dir, seq_id, error_metric):
-        # Get the directory names
-        dirs = os.listdir(pe_dir)
-
-        # For each directory
-        for d in dirs:
-            # Get the name of this directory
-            if os.path.isdir(os.path.join(pe_dir, d)):
-                # Get the indices in the directory name around the metric name
-                idx1 = d.find('error=')
-                idx2 = d.find('_ntop=')
-                # Extract the metric name
-                dir_metric = d[idx1 + 6:idx2]
-                # If this is the correct metric
-                if error_metric == dir_metric:
-                    # Create the name of the json file to load
-                    filename = os.path.join(pe_dir, d, 'errors_' + str(seq_id).zfill(6) + '.json')
-                    # Load the data
-                    with open(filename) as json_file:
-                        data = json.load(json_file)
-                    # Get the maximum error value
-                    max_error = 0.
-                    for e in data:
-                        err = e['errors']['0'][0]
-                        if err > max_error:
-                            max_error = err
-                    if max_error == 0.:
-                        max_error = 1.
-                    # Create the map
-                    pe_errors = {}
-                    for e in data:
-                        pe_errors[int(e['im_id'])] = 1.0 - (e['errors']['0'][0] / max_error)
-
-                    # Return the results
-                    return pe_errors
-
-        return None
-    '''
-
-    @staticmethod
-    def load_pose_estimation(pe_dir, seq_id, error_metric=None):
+    def load_pose_estimation(pe_dir, seq_id):
         # Store all the pose errors
         pose_errors = {}
 
@@ -171,11 +131,12 @@ class PE_VisRatio_Plotter:
         # Return the results
         return pose_errors
 
-
     @staticmethod
-    def plot_data(im_ids, vis_ratios, pose_estimates, corr_coeffs):
+    def plot_data(im_ids, vis_ratios, pose_estimates, corr_coeffs, figure_title=None):
         # Create window
         fig = plt.figure(figsize=(2, 5))
+        if figure_title is not None:
+            fig.suptitle(figure_title, fontsize=16)
         fig_manager = plt.get_current_fig_manager()
         fig_manager.resize(*fig_manager.window.maxsize())
 
@@ -189,6 +150,19 @@ class PE_VisRatio_Plotter:
             ax.text(0, 0, 'R = ' + str(round(corr_coeffs[i], 2)), fontsize=12,
                     bbox={'facecolor': 'white', 'edgecolor': 'white', 'alpha': 0.9, 'pad': 1})
 
+        # Plot for each error metric
+        fig = plt.figure(figsize=(2, 5))
+        if figure_title is not None:
+            fig.suptitle(figure_title, fontsize=16)
+        fig_manager = plt.get_current_fig_manager()
+        fig_manager.resize(*fig_manager.window.maxsize())
+        for i in range(num_error_metrics):
+            ax = fig.add_subplot(num_error_metrics, 1, i + 1)
+            ax.scatter(vis_ratios, pose_estimates[error_metrics[i]])
+            ax.set_title(error_metrics[i])
+            ax.text(0, 0, 'R = ' + str(round(corr_coeffs[i], 2)), fontsize=12,
+                    bbox={'facecolor': 'white', 'edgecolor': 'white', 'alpha': 0.9, 'pad': 1})
+
         plt.show()
 
 
@@ -198,8 +172,7 @@ if __name__ == '__main__':
     args = parser.parse_args()
 
     args.vis_ratio_file = '/home/tpatten/Data/Hands/HO3D_V2/visibility.json'
-    args.pose_estimation_dir = '/home/tpatten/Data/testr/pix2pose-iccv19_ho3d-test/'
-    args.seq_id = 1
-    args.error_metric = 'mspd'
+    args.pose_estimation_dir = '/home/tpatten/Data/testr/pix2pose-iccv19_ho3d-test'
+    args.seq_id = 5
 
     p = PE_VisRatio_Plotter(args)
