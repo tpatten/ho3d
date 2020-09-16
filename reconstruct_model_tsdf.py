@@ -664,13 +664,14 @@ class PoissonSurfaceReconstructor:
 if __name__ == '__main__':
     # Parse the arguments
     parser = argparse.ArgumentParser(description='HO-3D Object model reconstruction')
+    parser.add_argument("scene", type=str, help="Sequence of the dataset")
     args = parser.parse_args()
     args.ho3d_path = '/home/tpatten/Data/Hands/HO3D/'
     args.model_file = ''
     # args.model_file = '/home/tpatten/Data/Hands/HO3D/train/ABF10/GT_start0_max-1_skip1.xyz'
-    args.scene = 'ABF10'
-    args.visualize = True
-    args.save = True
+    # args.scene = 'ABF10'
+    args.visualize = False
+    args.save = False
     args.save_intermediate = False
     args.icp_method = ICPMethod.Point2Plane
     # Point2Point=1, Point2Plane=2
@@ -691,8 +692,9 @@ if __name__ == '__main__':
     args.construct_tsdf = True
 
     # Create the reconstruction
-    # reconstructor = ModelReconstructor(args)
+    reconstructor = ModelReconstructor(args)
 
+    '''
     # Clean up the mesh
     args.model_file = '/home/tpatten/Data/Hands/HO3D/train/ABF10/GT_start0_max-1_skip1_tsdf.ply'
     args.visualize = True
@@ -703,3 +705,4 @@ if __name__ == '__main__':
     args.raduis_rm_radius_factor = 0
     args.clean_up_outlier_removal = True
     psr = PoissonSurfaceReconstructor(args)
+    '''
