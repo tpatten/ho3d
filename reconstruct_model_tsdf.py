@@ -671,7 +671,7 @@ if __name__ == '__main__':
     # args.model_file = '/home/tpatten/Data/Hands/HO3D/train/ABF10/GT_start0_max-1_skip1.xyz'
     # args.scene = 'ABF10'
     args.visualize = False
-    args.save = False
+    args.save = True
     args.save_intermediate = False
     args.icp_method = ICPMethod.Point2Plane
     # Point2Point=1, Point2Plane=2

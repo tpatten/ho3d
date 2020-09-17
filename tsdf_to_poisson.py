@@ -18,7 +18,8 @@ class PoissonSurfaceReconstructor:
         self.args = args
 
         # Load the mesh
-        mesh = o3d.io.read_triangle_mesh(self.args.model_file)
+        tsdf_filename = os.path.join(self.args.ho3d_path, 'train', self.args.scene, self.args.model_file)
+        mesh = o3d.io.read_triangle_mesh(tsdf_filename)
 
         # First pass removes small clusters and creates intermediate surface reconstruction
         mesh = self.remove_noise(mesh)
@@ -39,25 +40,32 @@ class PoissonSurfaceReconstructor:
         # Rotate to correct coordinate system
         mesh.rotate(np.array([[1., 0., 0.], [0, -1., 0.], [0., 0., -1.]], dtype=np.float32), center=(0, 0, 0))
 
+        # Load the json file containing the mapping of the scene to YCB model
+        model_name_data = None
+        with open(os.path.join(self.args.ho3d_path, 'ho3d_to_ycb.json')) as f:
+            model_name_data = json.load(f)
+
         # Change scale and offset if this is the BOP format
         if self.args.bop_format:
-            offset_bop = np.asarray([-0.00499, 0.0024, 0.01329])
+            offset_bop = np.asarray(model_name_data[self.args.scene]['offset_bop'])
             mesh.translate(-offset_bop)
             mesh.scale(1000, center=(0, 0, 0))
 
         # Save
         if self.args.save:
-            filename = self.args.model_file.replace('.ply', '_poisson.ply')
-            o3d.io.write_triangle_mesh(filename, mesh)
+            save_filename = tsdf_filename.replace('.ply', '_poisson.ply')
+            o3d.io.write_triangle_mesh(save_filename, mesh)
 
         # Visualize
         if self.args.visualize:
             # Load ycbv model
             if self.args.bop_format:
-                mesh_ycb = o3d.io.read_triangle_mesh('/home/tpatten/Data/bop/ycbv/models_eval/obj_000012.ply')
+                ycb_model_filename = os.path.join(
+                    self.args.bop_model_path, 'obj_' + model_name_data[self.args.scene]['bop'].zfill(6) + '.ply')
             else:
-                mesh_ycb = o3d.io.read_triangle_mesh(
-                    '/home/tpatten/Data/Hands/HO3D_V2/HO3D_v2/models/021_bleach_cleanser/textured_simple.obj')
+                ycb_model_filename = os.path.join(
+                    self.args.ycb_model_path, model_name_data[self.args.scene]['ycbv'], 'textured_simple.obj')
+            mesh_ycb = o3d.io.read_triangle_mesh(ycb_model_filename)
             o3d.visualization.draw_geometries([mesh, mesh_ycb])
 
     @staticmethod
@@ -79,8 +87,8 @@ class PoissonSurfaceReconstructor:
         mesh_out = mesh_in.filter_smooth_taubin(number_of_iterations=3)
         mesh_out.compute_vertex_normals()
 
-        #mesh_out = mesh_in.filter_smooth_simple(number_of_iterations=2)
-        #mesh_out.compute_vertex_normals()
+        # mesh_out = mesh_in.filter_smooth_simple(number_of_iterations=2)
+        # mesh_out.compute_vertex_normals()
 
         return mesh_out
 
@@ -130,9 +138,13 @@ class PoissonSurfaceReconstructor:
 
 if __name__ == '__main__':
     # Parse the arguments
-    parser = argparse.ArgumentParser(description='HO-3D Object model reconstruction')
+    parser = argparse.ArgumentParser(description='HO-3D Clean up TSDF reconstruction with Poisson reconstruction')
     args = parser.parse_args()
-    args.model_file = '/home/tpatten/Data/Hands/HO3D/train/ABF10/GT_start0_max-1_skip1_tsdf.ply'
+    args.ho3d_path = '/home/tpatten/Data/Hands/HO3D/'
+    args.scene = 'SM2'
+    args.model_file = 'GT_start0_max-1_skip1_tsdf.ply'
+    args.ycb_model_path = '/home/tpatten/Data/Hands/HO3D_V2/HO3D_v2/models'
+    args.bop_model_path = '/home/tpatten/Data/bop/ycbv/models_eval'
     args.visualize = True
     args.save = True
     args.outlier_rm_nb_neighbors = 50  # Higher is more aggressive
