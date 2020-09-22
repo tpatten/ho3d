@@ -75,7 +75,7 @@ class ModelReconstructor:
             self.visualize(mask_pcds=[loaded_pcd])
             # self.visualize(mask_pcds=[self.load_object_model(self.args.model_file)])
 
-            if self.args.save:
+            if self.args.save and loaded_pcd is not None:
                 loaded_pcd = o3d.geometry.voxel_down_sample(loaded_pcd, 0.001)
                 o3d.geometry.estimate_normals(loaded_pcd,
                                               search_param=o3d.geometry.KDTreeSearchParamHybrid(
@@ -84,7 +84,7 @@ class ModelReconstructor:
                 normals = np.asarray(loaded_pcd.normals)
 
                 if self.args.model_file == '':
-                    filename = os.path.join(self.base_dir, self.data_split, self.args.scene,
+                    filename = os.path.join(self.base_dir, self.data_split,
                                             self.args.scene + '_' + str(self.args.reg_method).split('.')[1])
                     if self.args.reg_method == RegMethod.GT_ICP or self.args.reg_method == RegMethod.GT_ICP_FULL:
                         filename += '_' + str(self.args.icp_method).split('.')[1]
@@ -107,14 +107,61 @@ class ModelReconstructor:
                 o3d.io.write_point_cloud(filename.replace('.xyz', '.ply'), loaded_pcd)
 
     def reconstruct_object_model(self):
+        # Get directories for this scene
+        sub_dirs = sorted(os.listdir(os.path.join(self.base_dir, self.data_split)))
+        sub_dirs = [s for s in sub_dirs if s[:len(self.args.scene)] == self.args.scene and
+                    os.path.isdir(os.path.join(self.base_dir, self.data_split, s))]
+
+        cam_poses = []
+        est_cam_poses = []
+        mask_pcds = []
+        scene_pcds = []
+        processed_frames = []
+        for s in sub_dirs:
+            s_cam_poses, s_est_cam_poses, s_mask_pcds, s_scene_pcds, s_processed_frames = self.reconstruct_from_scene(s)
+            if len(sub_dirs) < 2:
+                cam_poses.extend(s_cam_poses)
+                est_cam_poses.extend(s_est_cam_poses)
+                mask_pcds.extend(s_mask_pcds)
+                scene_pcds.extend(s_scene_pcds)
+                processed_frames.extend(s_processed_frames)
+
+        # Get the mesh from the TSDF
+        tsdf_mesh = None
+        if self.args.construct_tsdf:
+            tsdf_mesh = self.volume.extract_triangle_mesh()
+            tsdf_mesh.compute_vertex_normals()
+
+        # Save
+        combined_pcd = None
+        if self.args.save:
+            base_dir = os.path.join(self.base_dir, self.data_split)
+            combined_pcd = self.save_clouds_and_camera_poses(base_dir, processed_frames, cam_poses, est_cam_poses,
+                                                             mask_pcds, tsdf_mesh)
+
+        # Visualize
+        if self.args.visualize:
+            scene_pcds = None
+            if self.args.reg_method == RegMethod.GT:
+                self.visualize(cam_poses, mask_pcds, scene_pcds=scene_pcds)
+            else:
+                self.visualize(est_cam_poses, mask_pcds, scene_pcds=scene_pcds, gt_poses=cam_poses)
+            self.visualize_volume(tsdf_mesh)
+
+        if combined_pcd is None:
+            return self.combine_clouds(mask_pcds)
+        else:
+            return combined_pcd
+
+    def reconstruct_from_scene(self, scene_id):
         # Get the scene ids
-        frame_ids = sorted(os.listdir(os.path.join(self.base_dir, self.data_split, self.args.scene, 'rgb')))
+        frame_ids = sorted(os.listdir(os.path.join(self.base_dir, self.data_split, scene_id, 'rgb')))
 
         # Load the camera parameters
-        cam_params = self.read_camera_intrinsics(self.args.scene)
+        cam_params = self.read_camera_intrinsics(scene_id)
 
         # Initialize the TSDF volume
-        if self.args.construct_tsdf:
+        if self.args.construct_tsdf and self.volume is None:
             self.volume = o3d.integration.ScalableTSDFVolume(
                 voxel_length=self.args.sdf_voxel_length,
                 sdf_trunc=self.args.sdf_trunc,
@@ -132,7 +179,7 @@ class ModelReconstructor:
             # Get the id
             frame_id = frame_ids[counter].split('.')[0]
             # Create the filename for the metadata file
-            meta_filename = os.path.join(self.base_dir, self.data_split, self.args.scene, 'meta',
+            meta_filename = os.path.join(self.base_dir, self.data_split, scene_id, 'meta',
                                          str(frame_id) + '.pkl')
             if self.args.max_num == 0:
                 print('[{}/{}] Processing file {}'.format(counter, len(frame_ids), meta_filename))
@@ -140,17 +187,17 @@ class ModelReconstructor:
                 print('[{}/{}] Processing file {}'.format(num_processed, self.args.max_num, meta_filename))
 
             # Read image, depths maps and annotations
-            self.rgb, self.depth, self.anno, scene_pcd = self.load_data(self.args.scene, frame_id)
+            self.rgb, self.depth, self.anno, scene_pcd = self.load_data(scene_id, frame_id)
 
             # Read the mask
-            mask = self.load_mask(frame_id)
+            mask = self.load_mask(scene_id, frame_id)
             if mask is None:
                 print('No mask available for frame {}'.format(frame_id))
                 counter += self.args.skip
                 continue
 
             # Extract the masked point cloud
-            cloud, colors = self.image_to_world(mask, cut_z=np.linalg.norm(self.anno['objTrans'])*1.1)
+            cloud, colors = self.image_to_world(mask, cut_z=np.linalg.norm(self.anno['objTrans']) * 1.1)
             if cloud.shape[0] == 0:
                 print('Empty cloud for frame {}'.format(frame_id))
                 counter += self.args.skip
@@ -174,7 +221,7 @@ class ModelReconstructor:
                                        outlier_rm_std_ratio=self.args.outlier_rm_std_ratio,
                                        raduis_rm_min_nb_points=self.args.raduis_rm_min_nb_points,
                                        raduis_rm_radius=self.args.voxel_size * self.args.raduis_rm_radius_factor)
-            #mask_pcd = remove_outliers(mask_pcd,
+            # mask_pcd = remove_outliers(mask_pcd,
             #                           outlier_rm_nb_neighbors=self.args.outlier_rm_nb_neighbors,
             #                           outlier_rm_std_ratio=self.args.outlier_rm_std_ratio)
 
@@ -220,35 +267,11 @@ class ModelReconstructor:
 
             # Save intermediate results
             if self.args.save and self.args.save_intermediate and num_processed % 20 == 0:
-                base_dir = os.path.join(self.base_dir, self.data_split, self.args.scene)
+                base_dir = os.path.join(self.base_dir, self.data_split, scene_id)
                 self.save_clouds_and_camera_poses(base_dir, processed_frames, cam_poses, est_cam_poses, mask_pcds,
                                                   frame_id=frame_id)
-        # Get the mesh from the TSDF
-        tsdf_mesh = None
-        if self.args.construct_tsdf:
-            tsdf_mesh = self.volume.extract_triangle_mesh()
-            tsdf_mesh.compute_vertex_normals()
 
-        # Save
-        combined_pcd = None
-        if self.args.save:
-            base_dir = os.path.join(self.base_dir, self.data_split, self.args.scene)
-            combined_pcd = self.save_clouds_and_camera_poses(base_dir, processed_frames, cam_poses, est_cam_poses,
-                                                             mask_pcds, tsdf_mesh)
-
-        # Visualize
-        if self.args.visualize:
-            scene_pcds = None
-            if self.args.reg_method == RegMethod.GT:
-                self.visualize(cam_poses, mask_pcds, scene_pcds=scene_pcds)
-            else:
-                self.visualize(est_cam_poses, mask_pcds, scene_pcds=scene_pcds, gt_poses=cam_poses)
-            self.visualize_volume(tsdf_mesh)
-
-        if combined_pcd is None:
-            return self.combine_clouds(mask_pcds)
-        else:
-            return combined_pcd
+        return cam_poses, est_cam_poses, mask_pcds, scene_pcds, processed_frames
 
     def load_data(self, seq_name, frame_id):
         rgb = read_RGB_img(self.base_dir, seq_name, frame_id, self.data_split)
@@ -269,12 +292,12 @@ class ModelReconstructor:
 
         return rgb, depth, anno, scene_pcd
 
-    def load_mask(self, frame_id):
+    def load_mask(self, scene_id, frame_id):
         mask = None
 
         # If my masks
         if self.mask_dir == OBJECT_MASK_VISIBLE_DIR:
-            mask_filename = os.path.join(self.base_dir, self.data_split, self.args.scene, 'mask',
+            mask_filename = os.path.join(self.base_dir, self.data_split, scene_id, 'mask',
                                          self.mask_dir, str(frame_id) + '.png')
             if not os.path.exists(mask_filename):
                 return mask
@@ -283,7 +306,7 @@ class ModelReconstructor:
         # Otherwise, ho3d masks
         else:
             # Load the mask file
-            mask_filename = os.path.join(self.mask_dir, self.data_split, self.args.scene, 'seg', str(frame_id) + '.jpg')
+            mask_filename = os.path.join(self.mask_dir, self.data_split, scene_id, 'seg', str(frame_id) + '.jpg')
 
             if not os.path.exists(mask_filename):
                 return mask
@@ -501,12 +524,15 @@ class ModelReconstructor:
             o3d.visualization.draw_geometries([mesh])
 
     def save_clouds_and_camera_poses(self, base_dir, frame_ids, cam_poses, est_cam_poses, mask_pcds, mesh, frame_id=0):
-        # Combine and downsample the clouds
-        down_pcd = self.combine_clouds(mask_pcds)
+        down_pcd = None
 
-        # Extract the points and normals
-        points = np.asarray(down_pcd.points)
-        normals = np.asarray(down_pcd.normals)
+        # Combine and downsample the clouds
+        if len(mask_pcds) > 0:
+            down_pcd = self.combine_clouds(mask_pcds)
+
+            # Extract the points and normals
+            points = np.asarray(down_pcd.points)
+            normals = np.asarray(down_pcd.normals)
 
         # Create the filename and write the data
         filename = os.path.join(base_dir, self.args.scene + '_' + str(self.args.reg_method).split('.')[1])
@@ -519,16 +545,29 @@ class ModelReconstructor:
         if int(frame_id) > 0:
             filename += '_frame' + str(frame_id)
         filename += '.xyz'
-        f = open(filename, "w")
-        for i in range(len(points)):
-            f.write('{} {} {} {} {} {}\n'.format(points[i, 0], points[i, 1], points[i, 2],
-                                                 normals[i, 0], normals[i, 1], normals[i, 2]))
-        f.close()
 
-        # Write at .ply
-        o3d.io.write_point_cloud(filename.replace('.xyz', '.ply'), down_pcd)
+        if down_pcd is not None:
+            f = open(filename, "w")
+            for i in range(len(points)):
+                f.write('{} {} {} {} {} {}\n'.format(points[i, 0], points[i, 1], points[i, 2],
+                                                     normals[i, 0], normals[i, 1], normals[i, 2]))
+            f.close()
+
+            # Write at .ply
+            o3d.io.write_point_cloud(filename.replace('.xyz', '.ply'), down_pcd)
 
         # Write the mesh as .ply
+        filename = os.path.join(base_dir, self.args.scene + '_' + str(self.args.reg_method).split('.')[1])
+        if self.args.reg_method == RegMethod.GT_ICP or self.args.reg_method == RegMethod.GT_ICP_FULL:
+            filename += '_' + str(self.args.icp_method).split('.')[1]
+        filename += '_start' + str(self.args.start_frame) + '_max' + str(self.args.max_num) + \
+                    '_skip' + str(self.args.skip)
+        if self.mask_dir != OBJECT_MASK_VISIBLE_DIR:
+            filename += '_segHO3D'
+        if int(frame_id) > 0:
+            filename += '_frame' + str(frame_id)
+        filename += '.xyz'
+
         o3d.io.write_triangle_mesh(filename.replace('.xyz', '_tsdf.ply'), mesh)
 
         '''
@@ -544,6 +583,9 @@ class ModelReconstructor:
 
     @staticmethod
     def combine_clouds(mask_pcds):
+        if len(mask_pcds) == 0:
+            return None
+
         all_points = np.asarray(mask_pcds[0].points)
         all_colors = np.asarray(mask_pcds[0].colors)
         for i in range(1, len(mask_pcds)):
@@ -609,15 +651,15 @@ if __name__ == '__main__':
     # args.mask_dir = OBJECT_MASK_VISIBLE_DIR
     args.mask_dir = '/home/tpatten/Data/Hands/HO3D_V2/HO3D_v2_segmentations_rendered/'
     args.visualize = False
-    args.save = False
+    args.save = True
     args.save_intermediate = False
     args.icp_method = ICPMethod.Point2Plane
     # Point2Point=1, Point2Plane=2
     args.reg_method = RegMethod.GT
     # GT=1, GT_ICP=2, GT_ICP_FULL=3
     args.start_frame = 0
-    args.max_num = -1
-    args.skip = 1
+    args.max_num = 1000
+    args.skip = 50
     args.mask_erosion_kernel = 5
     args.outlier_rm_nb_neighbors = 2500  # Higher is more aggressive
     args.outlier_rm_std_ratio = 0.000001  # Smaller is more aggressive

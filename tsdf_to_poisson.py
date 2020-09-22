@@ -18,16 +18,22 @@ class PoissonSurfaceReconstructor:
         self.args = args
 
         # Load the mesh
-        tsdf_filename = os.path.join(self.args.ho3d_path, 'train', self.args.scene, self.args.model_file)
+        # If the first character is an underscore, then this is stored outside the scene files
+        if self.args.model_file[0] == '_':
+            tsdf_filename = os.path.join(self.args.ho3d_path, self.args.scene + self.args.model_file)
+        else:
+            tsdf_filename = os.path.join(self.args.ho3d_path, self.args.scene, self.args.model_file)
         mesh = o3d.io.read_triangle_mesh(tsdf_filename)
 
         # First pass removes small clusters and creates intermediate surface reconstruction
-        mesh = self.remove_noise(mesh)
-        mesh = self.reconstruction(mesh, r_method=ReconstructionMethod.BALL_PIVOT)
+        if self.args.model_file[0] == '_':
+            mesh = self.remove_noise(mesh)
+            mesh = self.reconstruction(mesh, r_method=ReconstructionMethod.BALL_PIVOT)
 
         # Second pass applies filter and final Poisson surface reconstruction
         mesh = self.remove_noise(mesh)
-        mesh = self.taubin_filer(mesh)
+        if self.args.model_file[0] == '_':
+            mesh = self.taubin_filer(mesh)
         mesh = self.reconstruction(mesh, r_method=ReconstructionMethod.POISSON)
 
         # Clean up
@@ -42,12 +48,14 @@ class PoissonSurfaceReconstructor:
 
         # Load the json file containing the mapping of the scene to YCB model
         model_name_data = None
-        with open(os.path.join(self.args.ho3d_path, 'ho3d_to_ycb.json')) as f:
+        with open(os.path.join(self.args.ho3d_to_ycb_map_path)) as f:
             model_name_data = json.load(f)
 
         # Change scale and offset if this is the BOP format
         if self.args.bop_format:
-            offset_bop = np.asarray(model_name_data[self.args.scene]['offset_bop'])
+            # If scene contains numbers, remove them
+            scene_key = ''.join([i for i in self.args.scene if not i.isdigit()])
+            offset_bop = np.asarray(model_name_data[scene_key]['offset_bop'])
             mesh.translate(-offset_bop)
             mesh.scale(1000, center=(0, 0, 0))
 
@@ -140,12 +148,14 @@ if __name__ == '__main__':
     # Parse the arguments
     parser = argparse.ArgumentParser(description='HO-3D Clean up TSDF reconstruction with Poisson reconstruction')
     args = parser.parse_args()
-    args.ho3d_path = '/home/tpatten/Data/Hands/HO3D/'
-    args.scene = 'SS1'
-    args.model_file = 'GT_start0_max-1_skip1_segHO3D_tsdf.ply'
+    args.ho3d_path = '/home/tpatten/Data/Hands/HO3D/train'
+    args.scene = 'ABF'
+    # args.model_file = 'GT_start0_max-1_skip1_segHO3D_tsdf.ply'
+    args.model_file = '_GT_start0_max1000_skip50_segHO3D_tsdf.ply'
     args.ycb_model_path = '/home/tpatten/Data/Hands/HO3D_V2/HO3D_v2/models'
     args.bop_model_path = '/home/tpatten/Data/bop/ycbv/models_eval'
-    args.visualize = False
+    args.ho3d_to_ycb_map_path = '/home/tpatten/Data/Hands/HO3D/ho3d_to_ycb.json'
+    args.visualize = True
     args.save = True
     args.outlier_rm_nb_neighbors = 50  # Higher is more aggressive
     args.outlier_rm_std_ratio = 0.01  # Smaller is more aggressive
