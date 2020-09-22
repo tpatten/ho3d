@@ -141,11 +141,11 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='HO-3D Clean up TSDF reconstruction with Poisson reconstruction')
     args = parser.parse_args()
     args.ho3d_path = '/home/tpatten/Data/Hands/HO3D/'
-    args.scene = 'SM2'
-    args.model_file = 'GT_start0_max-1_skip1_tsdf.ply'
+    args.scene = 'SS1'
+    args.model_file = 'GT_start0_max-1_skip1_segHO3D_tsdf.ply'
     args.ycb_model_path = '/home/tpatten/Data/Hands/HO3D_V2/HO3D_v2/models'
     args.bop_model_path = '/home/tpatten/Data/bop/ycbv/models_eval'
-    args.visualize = True
+    args.visualize = False
     args.save = True
     args.outlier_rm_nb_neighbors = 50  # Higher is more aggressive
     args.outlier_rm_std_ratio = 0.01  # Smaller is more aggressive

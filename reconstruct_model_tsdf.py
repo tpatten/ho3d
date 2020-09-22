@@ -10,9 +10,6 @@ import transforms3d as tf3d
 from enum import IntEnum
 
 
-HAND_MASK_DIR = 'hand'
-OBJECT_MASK_DIR = 'object'
-HAND_MASK_VISIBLE_DIR = 'hand_vis'
 OBJECT_MASK_VISIBLE_DIR = 'object_vis'
 COORD_CHANGE_MAT = np.array([[1., 0., 0.], [0, -1., 0.], [0., 0., -1.]], dtype=np.float32)
 ICP_THRESH = 0.02
@@ -35,6 +32,7 @@ class ModelReconstructor:
         self.args = args
         self.base_dir = args.ho3d_path
         self.data_split = 'train'
+        self.mask_dir = args.mask_dir
         self.rgb = None
         self.depth = None
         self.anno = None
@@ -87,13 +85,19 @@ class ModelReconstructor:
 
                 if self.args.model_file == '':
                     filename = os.path.join(self.base_dir, self.data_split, self.args.scene,
-                                            str(self.args.reg_method).split('.')[1])
+                                            self.args.scene + '_' + str(self.args.reg_method).split('.')[1])
                     if self.args.reg_method == RegMethod.GT_ICP or self.args.reg_method == RegMethod.GT_ICP_FULL:
                         filename += '_' + str(self.args.icp_method).split('.')[1]
                     filename += '_start' + str(self.args.start_frame) + '_max' + str(self.args.max_num) + \
-                                '_skip' + str(self.args.skip) + '_clean.xyz'
+                                '_skip' + str(self.args.skip)
+                    if self.mask_dir != OBJECT_MASK_VISIBLE_DIR:
+                        filename += '_segHO3D'
+                    filename += '_clean.xyz'
                 else:
-                    filename = self.args.model_file.split('.')[0] + '_clean.xyz'
+                    filename = self.args.model_file.split('.')[0]
+                    if self.mask_dir != OBJECT_MASK_VISIBLE_DIR:
+                        filename += '_segHO3D'
+                    filename += '_clean.xyz'
                 f = open(filename, "w")
                 for i in range(len(points)):
                     f.write('{} {} {} {} {} {}\n'.format(points[i, 0], points[i, 1], points[i, 2],
@@ -139,16 +143,11 @@ class ModelReconstructor:
             self.rgb, self.depth, self.anno, scene_pcd = self.load_data(self.args.scene, frame_id)
 
             # Read the mask
-            mask_filename = os.path.join(self.base_dir, self.data_split, self.args.scene, 'mask',
-                                         OBJECT_MASK_VISIBLE_DIR, str(frame_id) + '.png')
-            if not os.path.exists(mask_filename):
+            mask = self.load_mask(frame_id)
+            if mask is None:
                 print('No mask available for frame {}'.format(frame_id))
                 counter += self.args.skip
                 continue
-
-            mask = cv2.imread(mask_filename)[:, :, 0]
-            if self.erosion_kernel is not None:
-                mask = cv2.erode(mask, self.erosion_kernel, iterations=1)
 
             # Extract the masked point cloud
             cloud, colors = self.image_to_world(mask, cut_z=np.linalg.norm(self.anno['objTrans'])*1.1)
@@ -269,6 +268,43 @@ class ModelReconstructor:
         # scene_pcd.transform([[1, 0, 0, 0], [0, -1, 0, 0], [0, 0, -1, 0], [0, 0, 0, 1]])
 
         return rgb, depth, anno, scene_pcd
+
+    def load_mask(self, frame_id):
+        mask = None
+
+        # If my masks
+        if self.mask_dir == OBJECT_MASK_VISIBLE_DIR:
+            mask_filename = os.path.join(self.base_dir, self.data_split, self.args.scene, 'mask',
+                                         self.mask_dir, str(frame_id) + '.png')
+            if not os.path.exists(mask_filename):
+                return mask
+
+            mask = cv2.imread(mask_filename)[:, :, 0]
+        # Otherwise, ho3d masks
+        else:
+            # Load the mask file
+            mask_filename = os.path.join(self.mask_dir, self.data_split, self.args.scene, 'seg', str(frame_id) + '.jpg')
+
+            if not os.path.exists(mask_filename):
+                return mask
+
+            mask_rgb = cv2.imread(mask_filename)
+
+            # Generate binary mask
+            mask = np.zeros((mask_rgb.shape[0], mask_rgb.shape[1]))
+            for u in range(mask_rgb.shape[0]):
+                for v in range(mask_rgb.shape[1]):
+                    if mask_rgb[u, v, 0] > 230 and mask_rgb[u, v, 1] < 10 and mask_rgb[u, v, 2] < 10:
+                        mask[u, v] = 255
+
+            # Resize image to original size
+            mask = cv2.resize(mask, (self.rgb.shape[1], self.rgb.shape[0]), interpolation=cv2.INTER_NEAREST)
+
+        # Apply erosion
+        if self.erosion_kernel is not None:
+            mask = cv2.erode(mask, self.erosion_kernel, iterations=1)
+
+        return mask
 
     def read_camera_intrinsics(self, seq_name):
         cam_params = o3d.camera.PinholeCameraIntrinsic(o3d.camera.PinholeCameraIntrinsicParameters.PrimeSenseDefault)
@@ -473,11 +509,13 @@ class ModelReconstructor:
         normals = np.asarray(down_pcd.normals)
 
         # Create the filename and write the data
-        filename = os.path.join(base_dir, str(self.args.reg_method).split('.')[1])
+        filename = os.path.join(base_dir, self.args.scene + '_' + str(self.args.reg_method).split('.')[1])
         if self.args.reg_method == RegMethod.GT_ICP or self.args.reg_method == RegMethod.GT_ICP_FULL:
             filename += '_' + str(self.args.icp_method).split('.')[1]
         filename += '_start' + str(self.args.start_frame) + '_max' + str(self.args.max_num) +\
                     '_skip' + str(self.args.skip)
+        if self.mask_dir != OBJECT_MASK_VISIBLE_DIR:
+            filename += '_segHO3D'
         if int(frame_id) > 0:
             filename += '_frame' + str(frame_id)
         filename += '.xyz'
@@ -559,108 +597,6 @@ def remove_outliers(cloud, outlier_rm_nb_neighbors=0., outlier_rm_std_ratio=0.,
     return in_cloud
 
 
-class ReconstructionMethod(IntEnum):
-    POISSON = 1
-    BALL_PIVOT = 2
-
-
-class PoissonSurfaceReconstructor:
-    def __init__(self, args):
-        self.args = args
-
-        # Load the mesh
-        mesh = o3d.io.read_triangle_mesh(self.args.model_file)
-
-        # First pass removes small clusters and creates intermediate surface reconstruction
-        mesh = self.remove_noise(mesh)
-        mesh = self.reconstruction(mesh, r_method=ReconstructionMethod.BALL_PIVOT)
-
-        # Second pass applies filter and final Poisson surface reconstruction
-        mesh = self.remove_noise(mesh)
-        mesh = self.taubin_filer(mesh)
-        mesh = self.reconstruction(mesh, r_method=ReconstructionMethod.POISSON)
-
-        # Clean up
-        mesh = mesh.remove_degenerate_triangles()
-        mesh = mesh.remove_duplicated_triangles()
-        mesh = mesh.remove_duplicated_vertices()
-        mesh = mesh.remove_non_manifold_edges()
-        mesh = mesh.remove_unreferenced_vertices()
-
-        # Rotate to correct coordinate system
-        mesh.rotate(np.array([[1., 0., 0.], [0, -1., 0.], [0., 0., -1.]], dtype=np.float32), center=(0, 0, 0))
-
-        # Save
-        if self.args.save:
-            filename = self.args.model_file.replace('.ply', '_poisson.ply')
-            o3d.io.write_triangle_mesh(filename, mesh)
-
-        # Visualize
-        if self.args.visualize:
-            # Load ycbv model
-            BOP_FORMAT = True
-            if BOP_FORMAT:
-                mesh_ycb = o3d.io.read_triangle_mesh('/home/tpatten/Data/bop/ycbv/models_eval/obj_000012.ply')
-                offset_bop = np.asarray([-0.00499, 0.0024, 0.01329])
-                mesh.translate(-offset_bop)
-                mesh.scale(1000, center=(0, 0, 0))
-            else:
-                mesh_ycb = o3d.io.read_triangle_mesh(
-                    '/home/tpatten/Data/Hands/HO3D_V2/HO3D_v2/models/021_bleach_cleanser/textured_simple.obj')
-            o3d.visualization.draw_geometries([mesh, mesh_ycb])
-
-    @staticmethod
-    def remove_noise(mesh_in):
-        # Remove small (noisy) parts
-        triangle_clusters, cluster_n_triangles, cluster_area = (mesh_in.cluster_connected_triangles())
-        triangle_clusters = np.asarray(triangle_clusters)
-        cluster_n_triangles = np.asarray(cluster_n_triangles)
-
-        mesh_out = copy.deepcopy(mesh_in)
-        largest_cluster_idx = cluster_n_triangles.argmax()
-        triangles_to_remove = triangle_clusters != largest_cluster_idx
-        mesh_out.remove_triangles_by_mask(triangles_to_remove)
-
-        return mesh_out
-
-    @staticmethod
-    def taubin_filer(mesh_in):
-        mesh_out = mesh_in.filter_smooth_taubin(number_of_iterations=3)
-        mesh_out.compute_vertex_normals()
-
-        #mesh_out = mesh_in.filter_smooth_simple(number_of_iterations=2)
-        #mesh_out.compute_vertex_normals()
-
-        return mesh_out
-
-    def reconstruction(self, mesh_in, r_method=ReconstructionMethod.POISSON):
-        # First sample points
-        pcd = mesh_in.sample_points_poisson_disk(number_of_points=2500, init_factor=5)
-        # o3d.visualization.draw_geometries([pcd])
-
-        if r_method == ReconstructionMethod.POISSON:
-            # Try to remove outliers
-            if self.args.clean_up_outlier_removal:
-                pcd = remove_outliers(pcd,
-                                      outlier_rm_nb_neighbors=self.args.outlier_rm_nb_neighbors,
-                                      outlier_rm_std_ratio=self.args.outlier_rm_std_ratio,
-                                      raduis_rm_min_nb_points=self.args.raduis_rm_min_nb_points,
-                                      raduis_rm_radius=self.args.voxel_size * self.args.raduis_rm_radius_factor)
-                pcd.estimate_normals(search_param=o3d.geometry.KDTreeSearchParamHybrid(radius=0.1, max_nn=30))
-            # Run Poisson reconstruction
-            mesh_recon, _ = o3d.geometry.TriangleMesh.create_from_point_cloud_poisson(pcd, depth=9)
-        elif r_method == ReconstructionMethod.BALL_PIVOT:
-            # Ball pivoting
-            radii = [0.005, 0.01, 0.02, 0.04]
-            mesh_recon = o3d.geometry.TriangleMesh.create_from_point_cloud_ball_pivoting(
-                pcd, o3d.utility.DoubleVector(radii))
-        else:
-            print('Unknown reconstruction method selected')
-            mesh_recon = mesh_in
-
-        return mesh_recon
-
-
 if __name__ == '__main__':
     # Parse the arguments
     parser = argparse.ArgumentParser(description='HO-3D Object model reconstruction')
@@ -670,8 +606,10 @@ if __name__ == '__main__':
     args.model_file = ''
     # args.model_file = '/home/tpatten/Data/Hands/HO3D/train/ABF10/GT_start0_max-1_skip1.xyz'
     # args.scene = 'ABF10'
+    # args.mask_dir = OBJECT_MASK_VISIBLE_DIR
+    args.mask_dir = '/home/tpatten/Data/Hands/HO3D_V2/HO3D_v2_segmentations_rendered/'
     args.visualize = False
-    args.save = True
+    args.save = False
     args.save_intermediate = False
     args.icp_method = ICPMethod.Point2Plane
     # Point2Point=1, Point2Plane=2
@@ -693,16 +631,3 @@ if __name__ == '__main__':
 
     # Create the reconstruction
     reconstructor = ModelReconstructor(args)
-
-    '''
-    # Clean up the mesh
-    args.model_file = '/home/tpatten/Data/Hands/HO3D/train/ABF10/GT_start0_max-1_skip1_tsdf.ply'
-    args.visualize = True
-    args.save = False
-    args.outlier_rm_nb_neighbors = 50  # Higher is more aggressive
-    args.outlier_rm_std_ratio = 0.01  # Smaller is more aggressive
-    args.raduis_rm_min_nb_points = 0
-    args.raduis_rm_radius_factor = 0
-    args.clean_up_outlier_removal = True
-    psr = PoissonSurfaceReconstructor(args)
-    '''
