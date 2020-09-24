@@ -8,6 +8,7 @@ import open3d as o3d
 import copy
 import transforms3d as tf3d
 from enum import IntEnum
+import json
 
 
 OBJECT_MASK_VISIBLE_DIR = 'object_vis'
@@ -44,6 +45,13 @@ class ModelReconstructor:
         else:
             self.erosion_kernel = None
         self.volume = None
+
+        # Load the rendering scores file
+        if os.path.isfile(self.args.hand_obj_rendering_scores):
+            with open(self.args.hand_obj_rendering_scores) as json_file:
+                self.hand_obj_rendering_scores = json.load(json_file)
+        else:
+            self.hand_obj_rendering_scores = None
 
         # Reconstruct the model
         loaded_pcd = None
@@ -92,25 +100,34 @@ class ModelReconstructor:
                                 '_skip' + str(self.args.skip)
                     if self.mask_dir != OBJECT_MASK_VISIBLE_DIR:
                         filename += '_segHO3D'
+                    if self.hand_obj_rendering_scores is not None:
+                        filename += '_renFilter'
                     filename += '_clean.xyz'
                 else:
                     filename = self.args.model_file.split('.')[0]
                     if self.mask_dir != OBJECT_MASK_VISIBLE_DIR:
                         filename += '_segHO3D'
                     filename += '_clean.xyz'
+                print('Saving to: {}'.format(filename))
                 f = open(filename, "w")
                 for i in range(len(points)):
                     f.write('{} {} {} {} {} {}\n'.format(points[i, 0], points[i, 1], points[i, 2],
                                                          normals[i, 0], normals[i, 1], normals[i, 2]))
                 f.close()
 
+                print('Saving to: {}'.format(filename.replace('.xyz', '.ply')))
                 o3d.io.write_point_cloud(filename.replace('.xyz', '.ply'), loaded_pcd)
 
     def reconstruct_object_model(self):
-        # Get directories for this scene
-        sub_dirs = sorted(os.listdir(os.path.join(self.base_dir, self.data_split)))
-        sub_dirs = [s for s in sub_dirs if s[:len(self.args.scene)] == self.args.scene and
-                    os.path.isdir(os.path.join(self.base_dir, self.data_split, s))]
+        # If the input scene contains digit identifier, then it is the only subdir
+        if ''.join([i for i in self.args.scene if not i.isdigit()]) == self.args.scene:
+            # Get directories for this scene
+            sub_dirs = sorted(os.listdir(os.path.join(self.base_dir, self.data_split)))
+            sub_dirs = [s for s in sub_dirs if ''.join([i for i in s if not i.isdigit()]) == self.args.scene and
+                        os.path.isdir(os.path.join(self.base_dir, self.data_split, s))]
+            self.args.skip = 50
+        else:
+            sub_dirs = [self.args.scene]
 
         cam_poses = []
         est_cam_poses = []
@@ -154,6 +171,14 @@ class ModelReconstructor:
             return combined_pcd
 
     def reconstruct_from_scene(self, scene_id):
+        # Get the scene_id in the order list of directories in order to extract the matching hand/object visibilities
+        if self.hand_obj_rendering_scores is not None:
+            sub_dirs = sorted(os.listdir(os.path.join(self.base_dir, self.data_split)))
+            bop_scene_id = str(sub_dirs.index(scene_id) + 1)
+            scene_rendering_scores = self.hand_obj_rendering_scores[bop_scene_id]
+        else:
+            scene_rendering_scores = None
+
         # Get the scene ids
         frame_ids = sorted(os.listdir(os.path.join(self.base_dir, self.data_split, scene_id, 'rgb')))
 
@@ -185,6 +210,29 @@ class ModelReconstructor:
                 print('[{}/{}] Processing file {}'.format(counter, len(frame_ids), meta_filename))
             else:
                 print('[{}/{}] Processing file {}'.format(num_processed, self.args.max_num, meta_filename))
+
+            # Check this is a validly annotated frame
+            if scene_rendering_scores is not None:
+                frame_id_key = str(int(frame_id))
+                # [0] num_rendered, [1] visible_of_rendered, [2] valid_of_rendered, [3] valid_of_visible
+                # Number of pixels of the object must be more than 1000
+                if scene_rendering_scores[frame_id_key]['objs_scores'][0][0] < self.args.min_num_pixels:
+                    print('Too few visible pixels: {}'.format(
+                        scene_rendering_scores[frame_id_key]['objs_scores'][0][1]))
+                    counter += self.args.skip
+                    continue
+                # Ratio of visible (i.e. correctly rendered) object pixels must be above 95%
+                if scene_rendering_scores[frame_id_key]['objs_scores'][0][3] < self.args.min_ratio_valid:
+                    print('Object has low validity of pixels: {}'.format(
+                        scene_rendering_scores[frame_id_key]['objs_scores'][0][3]))
+                    counter += self.args.skip
+                    continue
+                # Ratio of visible (i.e. correctly rendered) hand pixels must be above 95%
+                if scene_rendering_scores[frame_id_key]['hand_scores'][3] < self.args.min_ratio_valid:
+                    print('Hand has low validity of pixels: {}'.format(
+                        scene_rendering_scores[frame_id_key]['hand_scores'][3]))
+                    counter += self.args.skip
+                    continue
 
             # Read image, depths maps and annotations
             self.rgb, self.depth, self.anno, scene_pcd = self.load_data(scene_id, frame_id)
@@ -270,6 +318,8 @@ class ModelReconstructor:
                 base_dir = os.path.join(self.base_dir, self.data_split, scene_id)
                 self.save_clouds_and_camera_poses(base_dir, processed_frames, cam_poses, est_cam_poses, mask_pcds,
                                                   frame_id=frame_id)
+
+        print('Processed {} frames out of {}'.format(num_processed, len(frame_ids)))
 
         return cam_poses, est_cam_poses, mask_pcds, scene_pcds, processed_frames
 
@@ -542,11 +592,14 @@ class ModelReconstructor:
                     '_skip' + str(self.args.skip)
         if self.mask_dir != OBJECT_MASK_VISIBLE_DIR:
             filename += '_segHO3D'
+        if self.hand_obj_rendering_scores is not None:
+            filename += '_renFilter'
         if int(frame_id) > 0:
             filename += '_frame' + str(frame_id)
         filename += '.xyz'
 
         if down_pcd is not None:
+            print('Saving to: {}'.format(filename))
             f = open(filename, "w")
             for i in range(len(points)):
                 f.write('{} {} {} {} {} {}\n'.format(points[i, 0], points[i, 1], points[i, 2],
@@ -564,10 +617,13 @@ class ModelReconstructor:
                     '_skip' + str(self.args.skip)
         if self.mask_dir != OBJECT_MASK_VISIBLE_DIR:
             filename += '_segHO3D'
+        if self.hand_obj_rendering_scores is not None:
+            filename += '_renFilter'
         if int(frame_id) > 0:
             filename += '_frame' + str(frame_id)
         filename += '.xyz'
 
+        print('Saving to: {}'.format(filename.replace('.xyz', '_tsdf.ply')))
         o3d.io.write_triangle_mesh(filename.replace('.xyz', '_tsdf.ply'), mesh)
 
         '''
@@ -644,12 +700,13 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='HO-3D Object model reconstruction')
     parser.add_argument("scene", type=str, help="Sequence of the dataset")
     args = parser.parse_args()
-    args.ho3d_path = '/home/tpatten/Data/Hands/HO3D/'
+    # args.ho3d_path = '/home/tpatten/Data/Hands/HO3D/'
+    args.ho3d_path = '/home/tpatten/v4rtemp/datasets/HandTracking/HO3D_v2'
     args.model_file = ''
     # args.model_file = '/home/tpatten/Data/Hands/HO3D/train/ABF10/GT_start0_max-1_skip1.xyz'
-    # args.scene = 'ABF10'
     # args.mask_dir = OBJECT_MASK_VISIBLE_DIR
     args.mask_dir = '/home/tpatten/Data/Hands/HO3D_V2/HO3D_v2_segmentations_rendered/'
+    args.hand_obj_rendering_scores = '/home/tpatten/Data/bop/ho3d/hand_obj_ren_scores.json'
     args.visualize = False
     args.save = True
     args.save_intermediate = False
@@ -658,8 +715,8 @@ if __name__ == '__main__':
     args.reg_method = RegMethod.GT
     # GT=1, GT_ICP=2, GT_ICP_FULL=3
     args.start_frame = 0
-    args.max_num = 1000
-    args.skip = 50
+    args.max_num = -1
+    args.skip = 1
     args.mask_erosion_kernel = 5
     args.outlier_rm_nb_neighbors = 2500  # Higher is more aggressive
     args.outlier_rm_std_ratio = 0.000001  # Smaller is more aggressive
@@ -670,6 +727,8 @@ if __name__ == '__main__':
     args.sdf_trunc = 0.02
     args.sdf_depth_trunc = 1.2
     args.construct_tsdf = True
+    args.min_num_pixels = 8000
+    args.min_ratio_valid = 0.94
 
     # Create the reconstruction
     reconstructor = ModelReconstructor(args)

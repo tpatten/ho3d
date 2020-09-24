@@ -74,7 +74,8 @@ class PoissonSurfaceReconstructor:
                 ycb_model_filename = os.path.join(
                     self.args.ycb_model_path, model_name_data[self.args.scene]['ycbv'], 'textured_simple.obj')
             mesh_ycb = o3d.io.read_triangle_mesh(ycb_model_filename)
-            o3d.visualization.draw_geometries([mesh, mesh_ycb])
+            # o3d.visualization.draw_geometries([mesh, mesh_ycb])
+            o3d.visualization.draw_geometries([mesh])
 
     @staticmethod
     def remove_noise(mesh_in):
@@ -115,7 +116,7 @@ class PoissonSurfaceReconstructor:
                                            raduis_rm_radius=0)
                 pcd.estimate_normals(search_param=o3d.geometry.KDTreeSearchParamHybrid(radius=0.1, max_nn=30))
             # Run Poisson reconstruction
-            mesh_recon, _ = o3d.geometry.TriangleMesh.create_from_point_cloud_poisson(pcd, depth=9)
+            mesh_recon, _ = o3d.geometry.TriangleMesh.create_from_point_cloud_poisson(pcd, depth=16)
         elif r_method == ReconstructionMethod.BALL_PIVOT:
             # Ball pivoting
             radii = [0.005, 0.01, 0.02, 0.04]
@@ -147,16 +148,20 @@ class PoissonSurfaceReconstructor:
 if __name__ == '__main__':
     # Parse the arguments
     parser = argparse.ArgumentParser(description='HO-3D Clean up TSDF reconstruction with Poisson reconstruction')
+    parser.add_argument("scene", type=str, help="Sequence of the dataset")
     args = parser.parse_args()
-    args.ho3d_path = '/home/tpatten/Data/Hands/HO3D/train'
-    args.scene = 'ABF'
-    # args.model_file = 'GT_start0_max-1_skip1_segHO3D_tsdf.ply'
-    args.model_file = '_GT_start0_max1000_skip50_segHO3D_tsdf.ply'
+    # args.ho3d_path = '/home/tpatten/Data/Hands/HO3D/train'
+    # args.ho3d_path = '/home/tpatten/v4rtemp/datasets/HandTracking/HO3D_v2/train'
+    # args.ho3d_path = '/home/tpatten/Data/Hands/HO3D/reconstructed_models_multiview'
+    args.ho3d_path = '/home/tpatten/v4rtemp/datasets/HandTracking/HO3D_v2'
+    # args.scene = 'ABF'
+    args.model_file = 'ABF10_GT_start0_max-1_skip1_segHO3D_renFilter_tsdf.ply'
+    # args.model_file = '_GT_start0_max1000_skip50_segHO3D_tsdf.ply'
     args.ycb_model_path = '/home/tpatten/Data/Hands/HO3D_V2/HO3D_v2/models'
     args.bop_model_path = '/home/tpatten/Data/bop/ycbv/models_eval'
     args.ho3d_to_ycb_map_path = '/home/tpatten/Data/Hands/HO3D/ho3d_to_ycb.json'
     args.visualize = True
-    args.save = True
+    args.save = False
     args.outlier_rm_nb_neighbors = 50  # Higher is more aggressive
     args.outlier_rm_std_ratio = 0.01  # Smaller is more aggressive
     args.clean_up_outlier_removal = True
