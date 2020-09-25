@@ -22,18 +22,21 @@ class PoissonSurfaceReconstructor:
         if self.args.model_file[0] == '_':
             tsdf_filename = os.path.join(self.args.ho3d_path, self.args.scene + self.args.model_file)
         else:
-            tsdf_filename = os.path.join(self.args.ho3d_path, self.args.scene, self.args.model_file)
+            if self.args.scene == '':
+                tsdf_filename = os.path.join(self.args.ho3d_path, self.args.model_file)
+            else:
+                tsdf_filename = os.path.join(self.args.ho3d_path, self.args.scene, self.args.model_file)
         mesh = o3d.io.read_triangle_mesh(tsdf_filename)
 
         # First pass removes small clusters and creates intermediate surface reconstruction
-        if self.args.model_file[0] == '_':
-            mesh = self.remove_noise(mesh)
-            mesh = self.reconstruction(mesh, r_method=ReconstructionMethod.BALL_PIVOT)
+        # if self.args.model_file[0] == '_':
+        #mesh = self.remove_noise(mesh)
+        #mesh = self.reconstruction(mesh, r_method=ReconstructionMethod.BALL_PIVOT)
 
         # Second pass applies filter and final Poisson surface reconstruction
         mesh = self.remove_noise(mesh)
-        if self.args.model_file[0] == '_':
-            mesh = self.taubin_filer(mesh)
+        # if self.args.model_file[0] == '_':
+        #mesh = self.taubin_filer(mesh)
         mesh = self.reconstruction(mesh, r_method=ReconstructionMethod.POISSON)
 
         # Clean up
@@ -51,10 +54,17 @@ class PoissonSurfaceReconstructor:
         with open(os.path.join(self.args.ho3d_to_ycb_map_path)) as f:
             model_name_data = json.load(f)
 
+        # Get the scene key
+        if self.args.scene == '':
+            # Get the characters in the model file before the first underscore
+            scene_key = self.args.model_file.split('_')[0]
+        else:
+            scene_key = self.args.scene
+        scene_key = ''.join([i for i in scene_key if not i.isdigit()])
+
         # Change scale and offset if this is the BOP format
         if self.args.bop_format:
             # If scene contains numbers, remove them
-            scene_key = ''.join([i for i in self.args.scene if not i.isdigit()])
             offset_bop = np.asarray(model_name_data[scene_key]['offset_bop'])
             mesh.translate(-offset_bop)
             mesh.scale(1000, center=(0, 0, 0))
@@ -69,10 +79,10 @@ class PoissonSurfaceReconstructor:
             # Load ycbv model
             if self.args.bop_format:
                 ycb_model_filename = os.path.join(
-                    self.args.bop_model_path, 'obj_' + model_name_data[self.args.scene]['bop'].zfill(6) + '.ply')
+                    self.args.bop_model_path, 'obj_' + model_name_data[scene_key]['bop'].zfill(6) + '.ply')
             else:
                 ycb_model_filename = os.path.join(
-                    self.args.ycb_model_path, model_name_data[self.args.scene]['ycbv'], 'textured_simple.obj')
+                    self.args.ycb_model_path, model_name_data[scene_key]['ycbv'], 'textured_simple.obj')
             mesh_ycb = o3d.io.read_triangle_mesh(ycb_model_filename)
             # o3d.visualization.draw_geometries([mesh, mesh_ycb])
             o3d.visualization.draw_geometries([mesh])
@@ -148,20 +158,19 @@ class PoissonSurfaceReconstructor:
 if __name__ == '__main__':
     # Parse the arguments
     parser = argparse.ArgumentParser(description='HO-3D Clean up TSDF reconstruction with Poisson reconstruction')
-    parser.add_argument("scene", type=str, help="Sequence of the dataset")
+    parser.add_argument("--scene", type=str, help="Sequence of the dataset", default='')
     args = parser.parse_args()
     # args.ho3d_path = '/home/tpatten/Data/Hands/HO3D/train'
-    # args.ho3d_path = '/home/tpatten/v4rtemp/datasets/HandTracking/HO3D_v2/train'
+    args.ho3d_path = '/home/tpatten/v4rtemp/datasets/HandTracking/HO3D_v2/train'
     # args.ho3d_path = '/home/tpatten/Data/Hands/HO3D/reconstructed_models_multiview'
-    args.ho3d_path = '/home/tpatten/v4rtemp/datasets/HandTracking/HO3D_v2'
     # args.scene = 'ABF'
-    args.model_file = 'ABF10_GT_start0_max-1_skip1_segHO3D_renFilter_tsdf.ply'
+    args.model_file = 'GPMF10_GT_start0_max-1_skip1_segHO3D_renFilter_visRatio0-94_tsdf.ply'
     # args.model_file = '_GT_start0_max1000_skip50_segHO3D_tsdf.ply'
     args.ycb_model_path = '/home/tpatten/Data/Hands/HO3D_V2/HO3D_v2/models'
     args.bop_model_path = '/home/tpatten/Data/bop/ycbv/models_eval'
     args.ho3d_to_ycb_map_path = '/home/tpatten/Data/Hands/HO3D/ho3d_to_ycb.json'
-    args.visualize = True
-    args.save = False
+    args.visualize = False
+    args.save = True
     args.outlier_rm_nb_neighbors = 50  # Higher is more aggressive
     args.outlier_rm_std_ratio = 0.01  # Smaller is more aggressive
     args.clean_up_outlier_removal = True

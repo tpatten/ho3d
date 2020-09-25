@@ -215,22 +215,28 @@ class ModelReconstructor:
             if scene_rendering_scores is not None:
                 frame_id_key = str(int(frame_id))
                 # [0] num_rendered, [1] visible_of_rendered, [2] valid_of_rendered, [3] valid_of_visible
-                # Number of pixels of the object must be more than 1000
+                # Number of pixels of the object must be more than min_num_pixels
                 if scene_rendering_scores[frame_id_key]['objs_scores'][0][0] < self.args.min_num_pixels:
                     print('Too few visible pixels: {}'.format(
                         scene_rendering_scores[frame_id_key]['objs_scores'][0][1]))
                     counter += self.args.skip
                     continue
-                # Ratio of visible (i.e. correctly rendered) object pixels must be above 95%
+                # Ratio of visible (i.e., correctly rendered) object pixels must be above min_ratio_valid
                 if scene_rendering_scores[frame_id_key]['objs_scores'][0][3] < self.args.min_ratio_valid:
                     print('Object has low validity of pixels: {}'.format(
                         scene_rendering_scores[frame_id_key]['objs_scores'][0][3]))
                     counter += self.args.skip
                     continue
-                # Ratio of visible (i.e. correctly rendered) hand pixels must be above 95%
+                # Ratio of visible (i.e., correctly rendered) hand pixels must be above min_ratio_valid
                 if scene_rendering_scores[frame_id_key]['hand_scores'][3] < self.args.min_ratio_valid:
                     print('Hand has low validity of pixels: {}'.format(
                         scene_rendering_scores[frame_id_key]['hand_scores'][3]))
+                    counter += self.args.skip
+                    continue
+                # Ratio of visible (i.e., correctly rendered) scene pixels must be above min_ratio_valid
+                if scene_rendering_scores[frame_id_key]['scores'][3] < self.args.min_ratio_valid:
+                    print('Scene has low validity of pixels: {}'.format(
+                        scene_rendering_scores[frame_id_key]['scores'][3]))
                     counter += self.args.skip
                     continue
 
@@ -284,6 +290,17 @@ class ModelReconstructor:
             if self.args.construct_tsdf:
                 masked_rgb = self.apply_mask(self.rgb, mask)
                 masked_depth = self.apply_mask(self.depth, mask)
+                '''
+                max_depth = np.max(masked_depth)
+                if max_depth > self.args.max_depth_tsdf:
+                    print('Rejecting frame for TSDF reconstruction because of large depth: {}'.format(max_depth))
+                else:
+                    masked_rgb = o3d.geometry.Image(masked_rgb)
+                    masked_depth = o3d.geometry.Image((masked_depth * 1000).astype(np.float32))
+                    rgbd = o3d.geometry.create_rgbd_image_from_color_and_depth(
+                        masked_rgb, masked_depth, depth_trunc=self.args.sdf_depth_trunc, convert_rgb_to_intensity=False)
+                    self.volume.integrate(rgbd, cam_params, np.linalg.inv(cam_pose))
+                '''
                 masked_rgb = o3d.geometry.Image(masked_rgb)
                 masked_depth = o3d.geometry.Image((masked_depth * 1000).astype(np.float32))
                 rgbd = o3d.geometry.create_rgbd_image_from_color_and_depth(
@@ -610,21 +627,11 @@ class ModelReconstructor:
             o3d.io.write_point_cloud(filename.replace('.xyz', '.ply'), down_pcd)
 
         # Write the mesh as .ply
-        filename = os.path.join(base_dir, self.args.scene + '_' + str(self.args.reg_method).split('.')[1])
-        if self.args.reg_method == RegMethod.GT_ICP or self.args.reg_method == RegMethod.GT_ICP_FULL:
-            filename += '_' + str(self.args.icp_method).split('.')[1]
-        filename += '_start' + str(self.args.start_frame) + '_max' + str(self.args.max_num) + \
-                    '_skip' + str(self.args.skip)
-        if self.mask_dir != OBJECT_MASK_VISIBLE_DIR:
-            filename += '_segHO3D'
-        if self.hand_obj_rendering_scores is not None:
-            filename += '_renFilter'
-        if int(frame_id) > 0:
-            filename += '_frame' + str(frame_id)
-        filename += '.xyz'
-
-        print('Saving to: {}'.format(filename.replace('.xyz', '_tsdf.ply')))
-        o3d.io.write_triangle_mesh(filename.replace('.xyz', '_tsdf.ply'), mesh)
+        filename = filename.replace('.xyz', '')
+        filename += '_visRatio' + str(self.args.min_ratio_valid).replace('.', '-')
+        filename += '_tsdf.ply'
+        print('Saving to: {}'.format(filename))
+        o3d.io.write_triangle_mesh(filename, mesh)
 
         '''
         # Create visualizer
@@ -723,9 +730,11 @@ if __name__ == '__main__':
     args.raduis_rm_min_nb_points = 250  # Don't change
     args.raduis_rm_radius_factor = 10  # Don't change
     args.voxel_size = 0.001
-    args.sdf_voxel_length = 2.0 / 512.0
+    # args.sdf_voxel_length = 2.0 / 512.0
+    args.sdf_voxel_length = 0.001
     args.sdf_trunc = 0.02
     args.sdf_depth_trunc = 1.2
+    args.max_depth_tsdf = 3.0
     args.construct_tsdf = True
     args.min_num_pixels = 8000
     args.min_ratio_valid = 0.94
