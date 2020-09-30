@@ -248,7 +248,7 @@ class ModelReconstructor:
             self.rgb, self.depth, self.anno, scene_pcd = self.load_data(scene_id, frame_id)
 
             # Read the mask
-            mask = self.load_mask(scene_id, frame_id)
+            mask, mask_hand = self.load_mask(scene_id, frame_id)
             if mask is None:
                 print('No mask available for frame {}'.format(frame_id))
                 counter += self.args.skip
@@ -297,6 +297,7 @@ class ModelReconstructor:
 
                 # Inpaint the depth image
                 if self.args.apply_inpainting:
+                    '''
                     dep_shape = masked_depth.shape
                     masked_depth = masked_depth.flatten()
                     # Mask out values that have too large depth values
@@ -308,6 +309,8 @@ class ModelReconstructor:
                     inpaint_mask = np.multiply((mask == 255), (masked_depth == 0)).astype(np.uint8)
                     # Inpaint the depth image
                     masked_depth = self.inpaint(masked_depth, mask=inpaint_mask)
+                    '''
+                    masked_depth = self.get_inpainted_depth(masked_depth, mask, mask_hand)
 
                 masked_rgb = o3d.geometry.Image(masked_rgb)
                 masked_depth = o3d.geometry.Image((masked_depth * 1000).astype(np.float32))
@@ -369,13 +372,14 @@ class ModelReconstructor:
 
     def load_mask(self, scene_id, frame_id):
         mask = None
+        hand = None
 
         # If my masks
         if self.mask_dir == OBJECT_MASK_VISIBLE_DIR:
             mask_filename = os.path.join(self.base_dir, self.data_split, scene_id, 'mask',
                                          self.mask_dir, str(frame_id) + '.png')
             if not os.path.exists(mask_filename):
-                return mask
+                return mask, hand
 
             mask = cv2.imread(mask_filename)[:, :, 0]
         # Otherwise, ho3d masks
@@ -384,25 +388,30 @@ class ModelReconstructor:
             mask_filename = os.path.join(self.mask_dir, self.data_split, scene_id, 'seg', str(frame_id) + '.jpg')
 
             if not os.path.exists(mask_filename):
-                return mask
+                return mask, hand
 
             mask_rgb = cv2.imread(mask_filename)
 
             # Generate binary mask
             mask = np.zeros((mask_rgb.shape[0], mask_rgb.shape[1]))
+            hand = np.zeros((mask_rgb.shape[0], mask_rgb.shape[1]))
             for u in range(mask_rgb.shape[0]):
                 for v in range(mask_rgb.shape[1]):
                     if mask_rgb[u, v, 0] > 230 and mask_rgb[u, v, 1] < 10 and mask_rgb[u, v, 2] < 10:
                         mask[u, v] = 255
+                    if mask_rgb[u, v, 0] < 10 and mask_rgb[u, v, 1] < 10 and mask_rgb[u, v, 2] > 230:
+                        hand[u, v] = 255
 
             # Resize image to original size
             mask = cv2.resize(mask, (self.rgb.shape[1], self.rgb.shape[0]), interpolation=cv2.INTER_NEAREST)
+            hand = cv2.resize(hand, (self.rgb.shape[1], self.rgb.shape[0]), interpolation=cv2.INTER_NEAREST)
 
         # Apply erosion
         if self.erosion_kernel is not None:
             mask = cv2.erode(mask, self.erosion_kernel, iterations=1)
+            hand = cv2.erode(hand, self.erosion_kernel, iterations=1)
 
-        return mask
+        return mask, hand
 
     def read_camera_intrinsics(self, seq_name):
         cam_params = o3d.camera.PinholeCameraIntrinsic(o3d.camera.PinholeCameraIntrinsicParameters.PrimeSenseDefault)
@@ -470,8 +479,7 @@ class ModelReconstructor:
 
         return masked_image
 
-    '''
-    def get_inpainted_depth(self, masked_depth):
+    def get_inpainted_depth(self, masked_depth, mask_obj, mask_hand):
         dep_shape = masked_depth.shape
         masked_depth = masked_depth.flatten()
         # Mask out values that have too large depth values
@@ -479,11 +487,24 @@ class ModelReconstructor:
             if masked_depth[v] > self.args.max_depth_tsdf:
                 masked_depth[v] = 0
         masked_depth = masked_depth.reshape(dep_shape)
+
         # Get the mask that needs to be inpainted
-        inpaint_mask = np.multiply((mask == 255), (masked_depth == 0)).astype(np.uint8)
+        inpaint_mask = np.multiply((mask_obj == 255), (masked_depth == 0)).astype(np.uint8)
         # Inpaint the depth image
-        masked_depth = self.inpaint(masked_depth, mask=inpaint_mask)
-    '''
+        inpainted_depth = self.inpaint(masked_depth, mask=inpaint_mask)
+
+        # Inpaint the hand pixels
+        if mask_hand is not None:
+            inpaint_mask_hand = np.multiply((mask_hand == 255), (masked_depth == 0)).astype(np.uint8)
+            inpainted_depth = self.depth_fill(inpainted_depth, mask=inpaint_mask_hand)
+
+            # Fill in pixels from morphological close
+            mask_morph = (inpainted_depth > 0).astype(np.uint8)
+            mask_closed = cv2.morphologyEx(mask_morph, cv2.MORPH_CLOSE, np.ones((20, 20), np.uint8))
+            inpaint_mask_morph = ((mask_closed - mask_morph) == 1).astype(np.uint8)
+            inpainted_depth = self.depth_fill(inpainted_depth, mask=inpaint_mask_morph)
+
+        return inpainted_depth
 
     @staticmethod
     def inpaint(img_in, mask=None, missing_value=0):
@@ -507,6 +528,53 @@ class ModelReconstructor:
         # Back to original size and value range.
         img_out = img_out[1:-1, 1:-1]
         img_out = img_out * scale
+
+        return img_out
+
+    @staticmethod
+    def depth_fill(img_in, mask=None, radius=20, iterations=1):
+        # Get the indices in the mask that need to be inpainted
+        mask_coords = np.unravel_index(np.where(mask.flatten() == 1)[0], mask.shape)
+        mask_coords = list(zip(mask_coords[1], mask_coords[0]))
+
+        # Iterate through the list and fill in missing values
+        img_out = np.copy(img_in)
+        search_radius = radius
+        for i in range(iterations):
+            # For each mask pixel
+            valid_mask_coords = []
+            for center in mask_coords:
+                # If the image pixel is 0, then it should be inpainted
+                if img_out[center[1], center[0]] == 0:
+                    # Get all neighboring pixels within a radius
+                    img_canvas = np.zeros(img_out.shape, np.uint8)
+                    cv2.circle(img_canvas, center, int(search_radius), 255, -1)
+                    neighbor_pixels = np.where(img_canvas == 255)
+                    neighbor_pixels = list(zip(neighbor_pixels[0], neighbor_pixels[1]))
+                    # Get the valid neighboring pixels
+                    valid_npx = []
+                    for npx in neighbor_pixels:
+                        if img_out[npx[0], npx[1]] > 0:
+                            valid_npx.append((npx[0], npx[1]))
+                    # If there are valid neighbors, add this to the list of valid mask pixels
+                    if len(valid_npx) > 0:
+                        valid_mask_coords.append((len(valid_npx), valid_npx, center))
+
+            # Sort the mask pixels according to the count of neighbors
+            valid_mask_coords = sorted(valid_mask_coords, key=lambda x: x[0])
+            # print(valid_mask_coords)
+
+            # Get the mean of the neighbors and fill the pixel, starting with pixels with the most valid neighbors
+            for mask_el in valid_mask_coords:
+                depth = 0
+                for npx in mask_el[1]:
+                    depth += img_out[npx[0], npx[1]]
+                img_out[mask_el[2][1], mask_el[2][0]] = depth / float(mask_el[0])
+
+            # Reduce the search radius for the next iteration
+            search_radius /= 2
+            if search_radius < 1:
+                search_radius = 1
 
         return img_out
 
@@ -774,7 +842,7 @@ if __name__ == '__main__':
     # GT=1, GT_ICP=2, GT_ICP_FULL=3
     args.start_frame = 0
     args.max_num = -1
-    args.skip = 1
+    args.skip = 10
     args.mask_erosion_kernel = 5
     args.outlier_rm_nb_neighbors = 2500  # Higher is more aggressive
     args.outlier_rm_std_ratio = 0.000001  # Smaller is more aggressive
