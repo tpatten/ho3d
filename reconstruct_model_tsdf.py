@@ -102,6 +102,8 @@ class ModelReconstructor:
                         filename += '_segHO3D'
                     if self.hand_obj_rendering_scores is not None:
                         filename += '_renFilter'
+                    if self.args.apply_inpainting:
+                        filename += '_inPaint'
                     filename += '_clean.xyz'
                 else:
                     filename = self.args.model_file.split('.')[0]
@@ -109,14 +111,14 @@ class ModelReconstructor:
                         filename += '_segHO3D'
                     filename += '_clean.xyz'
                 print('Saving to: {}'.format(filename))
-                f = open(filename, "w")
-                for i in range(len(points)):
-                    f.write('{} {} {} {} {} {}\n'.format(points[i, 0], points[i, 1], points[i, 2],
-                                                         normals[i, 0], normals[i, 1], normals[i, 2]))
-                f.close()
+                #f = open(filename, "w")
+                #for i in range(len(points)):
+                #    f.write('{} {} {} {} {} {}\n'.format(points[i, 0], points[i, 1], points[i, 2],
+                #                                         normals[i, 0], normals[i, 1], normals[i, 2]))
+                #f.close()
 
-                print('Saving to: {}'.format(filename.replace('.xyz', '.ply')))
-                o3d.io.write_point_cloud(filename.replace('.xyz', '.ply'), loaded_pcd)
+                #print('Saving to: {}'.format(filename.replace('.xyz', '.ply')))
+                #o3d.io.write_point_cloud(filename.replace('.xyz', '.ply'), loaded_pcd)
 
     def reconstruct_object_model(self):
         # If the input scene contains digit identifier, then it is the only subdir
@@ -173,8 +175,10 @@ class ModelReconstructor:
     def reconstruct_from_scene(self, scene_id):
         # Get the scene_id in the order list of directories in order to extract the matching hand/object visibilities
         if self.hand_obj_rendering_scores is not None:
-            sub_dirs = sorted(os.listdir(os.path.join(self.base_dir, self.data_split)))
+            sub_dirs = sorted([f for f in os.listdir(os.path.join(self.base_dir, self.data_split))
+                               if os.path.isdir(os.path.join(self.base_dir, self.data_split, f))])
             bop_scene_id = str(sub_dirs.index(scene_id) + 1)
+            print('BOP ID is {} from HO-3D ID {}'.format(bop_scene_id, scene_id))
             scene_rendering_scores = self.hand_obj_rendering_scores[bop_scene_id]
         else:
             scene_rendering_scores = None
@@ -206,7 +210,7 @@ class ModelReconstructor:
             # Create the filename for the metadata file
             meta_filename = os.path.join(self.base_dir, self.data_split, scene_id, 'meta',
                                          str(frame_id) + '.pkl')
-            if self.args.max_num == 0:
+            if self.args.max_num <= 0:
                 print('[{}/{}] Processing file {}'.format(counter, len(frame_ids), meta_filename))
             else:
                 print('[{}/{}] Processing file {}'.format(num_processed, self.args.max_num, meta_filename))
@@ -218,26 +222,26 @@ class ModelReconstructor:
                 # Number of pixels of the object must be more than min_num_pixels
                 if scene_rendering_scores[frame_id_key]['objs_scores'][0][0] < self.args.min_num_pixels:
                     print('Too few visible pixels: {}'.format(
-                        scene_rendering_scores[frame_id_key]['objs_scores'][0][1]))
-                    counter += self.args.skip
+                        scene_rendering_scores[frame_id_key]['objs_scores'][0][0]))
+                    counter += 1
                     continue
                 # Ratio of visible (i.e., correctly rendered) object pixels must be above min_ratio_valid
                 if scene_rendering_scores[frame_id_key]['objs_scores'][0][3] < self.args.min_ratio_valid:
                     print('Object has low validity of pixels: {}'.format(
                         scene_rendering_scores[frame_id_key]['objs_scores'][0][3]))
-                    counter += self.args.skip
+                    counter += 1
                     continue
                 # Ratio of visible (i.e., correctly rendered) hand pixels must be above min_ratio_valid
                 if scene_rendering_scores[frame_id_key]['hand_scores'][3] < self.args.min_ratio_valid:
                     print('Hand has low validity of pixels: {}'.format(
                         scene_rendering_scores[frame_id_key]['hand_scores'][3]))
-                    counter += self.args.skip
+                    counter += 1
                     continue
                 # Ratio of visible (i.e., correctly rendered) scene pixels must be above min_ratio_valid
                 if scene_rendering_scores[frame_id_key]['scores'][3] < self.args.min_ratio_valid:
                     print('Scene has low validity of pixels: {}'.format(
                         scene_rendering_scores[frame_id_key]['scores'][3]))
-                    counter += self.args.skip
+                    counter += 1
                     continue
 
             # Read image, depths maps and annotations
@@ -290,17 +294,21 @@ class ModelReconstructor:
             if self.args.construct_tsdf:
                 masked_rgb = self.apply_mask(self.rgb, mask)
                 masked_depth = self.apply_mask(self.depth, mask)
-                '''
-                max_depth = np.max(masked_depth)
-                if max_depth > self.args.max_depth_tsdf:
-                    print('Rejecting frame for TSDF reconstruction because of large depth: {}'.format(max_depth))
-                else:
-                    masked_rgb = o3d.geometry.Image(masked_rgb)
-                    masked_depth = o3d.geometry.Image((masked_depth * 1000).astype(np.float32))
-                    rgbd = o3d.geometry.create_rgbd_image_from_color_and_depth(
-                        masked_rgb, masked_depth, depth_trunc=self.args.sdf_depth_trunc, convert_rgb_to_intensity=False)
-                    self.volume.integrate(rgbd, cam_params, np.linalg.inv(cam_pose))
-                '''
+
+                # Inpaint the depth image
+                if self.args.apply_inpainting:
+                    dep_shape = masked_depth.shape
+                    masked_depth = masked_depth.flatten()
+                    # Mask out values that have too large depth values
+                    for v in range(len(masked_depth)):
+                        if masked_depth[v] > self.args.max_depth_tsdf:
+                            masked_depth[v] = 0
+                    masked_depth = masked_depth.reshape(dep_shape)
+                    # Get the mask that needs to be inpainted
+                    inpaint_mask = np.multiply((mask == 255), (masked_depth == 0)).astype(np.uint8)
+                    # Inpaint the depth image
+                    masked_depth = self.inpaint(masked_depth, mask=inpaint_mask)
+
                 masked_rgb = o3d.geometry.Image(masked_rgb)
                 masked_depth = o3d.geometry.Image((masked_depth * 1000).astype(np.float32))
                 rgbd = o3d.geometry.create_rgbd_image_from_color_and_depth(
@@ -462,6 +470,46 @@ class ModelReconstructor:
 
         return masked_image
 
+    '''
+    def get_inpainted_depth(self, masked_depth):
+        dep_shape = masked_depth.shape
+        masked_depth = masked_depth.flatten()
+        # Mask out values that have too large depth values
+        for v in range(len(masked_depth)):
+            if masked_depth[v] > self.args.max_depth_tsdf:
+                masked_depth[v] = 0
+        masked_depth = masked_depth.reshape(dep_shape)
+        # Get the mask that needs to be inpainted
+        inpaint_mask = np.multiply((mask == 255), (masked_depth == 0)).astype(np.uint8)
+        # Inpaint the depth image
+        masked_depth = self.inpaint(masked_depth, mask=inpaint_mask)
+    '''
+
+    @staticmethod
+    def inpaint(img_in, mask=None, missing_value=0):
+        """
+        Inpaint missing values in depth image.
+        :param missing_value: Value to fill in teh depth image.
+        """
+        # cv2 inpainting doesn't handle the border properly
+        # https://stackoverflow.com/questions/25974033/inpainting-depth-map-still-a-black-image-border
+        img_out = cv2.copyMakeBorder(img_in, 1, 1, 1, 1, cv2.BORDER_DEFAULT)
+        if mask is None:
+            mask = (img_out == missing_value).astype(np.uint8)
+        else:
+            mask = cv2.copyMakeBorder(mask, 1, 1, 1, 1, cv2.BORDER_DEFAULT)
+
+        # Scale to keep as float, but has to be in bounds -1:1 to keep opencv happy
+        scale = np.abs(img_out).max()
+        img_out = img_out.astype(np.float32) / scale  # Has to be float32, 64 not supported
+        img_out = cv2.inpaint(img_out, mask, 1, cv2.INPAINT_NS)
+
+        # Back to original size and value range.
+        img_out = img_out[1:-1, 1:-1]
+        img_out = img_out * scale
+
+        return img_out
+
     def transform_to_object_frame(self, cloud):
         # Get the ground truth transformation
         obj_trans = np.copy(self.anno['objTrans'])
@@ -611,20 +659,22 @@ class ModelReconstructor:
             filename += '_segHO3D'
         if self.hand_obj_rendering_scores is not None:
             filename += '_renFilter'
+        if self.args.apply_inpainting:
+            filename += '_inPaint'
         if int(frame_id) > 0:
             filename += '_frame' + str(frame_id)
         filename += '.xyz'
 
         if down_pcd is not None:
             print('Saving to: {}'.format(filename))
-            f = open(filename, "w")
-            for i in range(len(points)):
-                f.write('{} {} {} {} {} {}\n'.format(points[i, 0], points[i, 1], points[i, 2],
-                                                     normals[i, 0], normals[i, 1], normals[i, 2]))
-            f.close()
+            #f = open(filename, "w")
+            #for i in range(len(points)):
+            #    f.write('{} {} {} {} {} {}\n'.format(points[i, 0], points[i, 1], points[i, 2],
+            #                                         normals[i, 0], normals[i, 1], normals[i, 2]))
+            #f.close()
 
             # Write at .ply
-            o3d.io.write_point_cloud(filename.replace('.xyz', '.ply'), down_pcd)
+            #o3d.io.write_point_cloud(filename.replace('.xyz', '.ply'), down_pcd)
 
         # Write the mesh as .ply
         filename = filename.replace('.xyz', '')
@@ -706,6 +756,7 @@ if __name__ == '__main__':
     # Parse the arguments
     parser = argparse.ArgumentParser(description='HO-3D Object model reconstruction')
     parser.add_argument("scene", type=str, help="Sequence of the dataset")
+    parser.add_argument("min_ratio_valid", type=float, help="The threshold at which visibility is set")
     args = parser.parse_args()
     # args.ho3d_path = '/home/tpatten/Data/Hands/HO3D/'
     args.ho3d_path = '/home/tpatten/v4rtemp/datasets/HandTracking/HO3D_v2'
@@ -734,10 +785,11 @@ if __name__ == '__main__':
     args.sdf_voxel_length = 0.001
     args.sdf_trunc = 0.02
     args.sdf_depth_trunc = 1.2
-    args.max_depth_tsdf = 3.0
+    args.max_depth_tsdf = 1.1
     args.construct_tsdf = True
     args.min_num_pixels = 8000
-    args.min_ratio_valid = 0.94
+    # args.min_ratio_valid = 0.10
+    args.apply_inpainting = False
 
     # Create the reconstruction
     reconstructor = ModelReconstructor(args)

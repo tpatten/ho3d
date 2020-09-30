@@ -156,15 +156,22 @@ class PoissonSurfaceReconstructor:
 
 
 if __name__ == '__main__':
+    # mesh_filename = '/home/tpatten/Data/in-hand_object_scanning_ICRA2019/ycb_meshes/banana.ply'
+    # mesh_in = o3d.io.read_triangle_mesh(mesh_filename)
+    # mesh_in.scale(1000, center=(0, 0, 0))
+    # save_filename = mesh_filename.replace('.ply', '_scaled.ply')
+    # o3d.io.write_triangle_mesh(save_filename, mesh_in)
+    # sys.exit(0)
+
     # Parse the arguments
     parser = argparse.ArgumentParser(description='HO-3D Clean up TSDF reconstruction with Poisson reconstruction')
+    parser.add_argument("model_file", type=str, help="The TSDF model file to be cleaned up")
     parser.add_argument("--scene", type=str, help="Sequence of the dataset", default='')
     args = parser.parse_args()
     # args.ho3d_path = '/home/tpatten/Data/Hands/HO3D/train'
     args.ho3d_path = '/home/tpatten/v4rtemp/datasets/HandTracking/HO3D_v2/train'
     # args.ho3d_path = '/home/tpatten/Data/Hands/HO3D/reconstructed_models_multiview'
-    # args.scene = 'ABF'
-    args.model_file = 'GPMF10_GT_start0_max-1_skip1_segHO3D_renFilter_visRatio0-94_tsdf.ply'
+    # args.model_file = 'SMu1_GT_start0_max-1_skip1_segHO3D_renFilter_visRatio0-8_tsdf.ply'
     # args.model_file = '_GT_start0_max1000_skip50_segHO3D_tsdf.ply'
     args.ycb_model_path = '/home/tpatten/Data/Hands/HO3D_V2/HO3D_v2/models'
     args.bop_model_path = '/home/tpatten/Data/bop/ycbv/models_eval'
