@@ -26,6 +26,7 @@ class PoissonSurfaceReconstructor:
                 tsdf_filename = os.path.join(self.args.ho3d_path, self.args.model_file)
             else:
                 tsdf_filename = os.path.join(self.args.ho3d_path, self.args.scene, self.args.model_file)
+        print('Processing {}'.format(tsdf_filename))
         mesh = o3d.io.read_triangle_mesh(tsdf_filename)
 
         # First pass removes small clusters and creates intermediate surface reconstruction
@@ -72,6 +73,7 @@ class PoissonSurfaceReconstructor:
         # Save
         if self.args.save:
             save_filename = tsdf_filename.replace('.ply', '_poisson.ply')
+            print('Saving {}'.format(save_filename))
             o3d.io.write_triangle_mesh(save_filename, mesh)
 
         # Visualize

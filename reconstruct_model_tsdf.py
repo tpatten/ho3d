@@ -701,7 +701,8 @@ class ModelReconstructor:
         vis.run()
         vis.destroy_window()
 
-    def visualize_volume(self, mesh):
+    @staticmethod
+    def visualize_volume(mesh):
         # Visualize
         if mesh is not None:
             o3d.visualization.draw_geometries([mesh])
@@ -842,7 +843,7 @@ if __name__ == '__main__':
     # GT=1, GT_ICP=2, GT_ICP_FULL=3
     args.start_frame = 0
     args.max_num = -1
-    args.skip = 10
+    args.skip = 1
     args.mask_erosion_kernel = 5
     args.outlier_rm_nb_neighbors = 2500  # Higher is more aggressive
     args.outlier_rm_std_ratio = 0.000001  # Smaller is more aggressive
