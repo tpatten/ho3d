@@ -30,6 +30,21 @@ class ViewpointSelector:
         self.base_dir = args.ho3d_path
         self.data_split = 'train'
 
+        # Create the filename to save to
+        filename = os.path.join(self.base_dir, self.data_split, self.args.scene,
+                                'views_' + str(self.args.selection_type).split('.')[1] +
+                                '_' + str(self.args.score_type).split('.')[1])
+        filename += '_step' + str(self.args.view_step_size).replace('.', '-')
+        filename += '.json'
+
+        # If it exists, print out the
+        if os.path.isfile(filename):
+            with open(filename) as json_file:
+                frame_ids = json.load(json_file)['frame_ids']
+            print('File: {}'.format(filename))
+            print('Views: {}'.format(len(frame_ids)))
+            sys.exit(0)
+
         # Load the scores file
         print('Loading viewpoint scores...')
         if self.args.score_type == ViewScore.Rendering:
@@ -54,11 +69,6 @@ class ViewpointSelector:
         # Save the views
         if self.args.save:
             # Create the filename and write the data
-            filename = os.path.join(self.base_dir, self.data_split, self.args.scene,
-                                    'views_' + str(self.args.selection_type).split('.')[1] +
-                                    '_' + str(self.args.score_type).split('.')[1])
-            filename += '_step' + str(self.args.view_step_size).replace('.', '-')
-            filename += '.json'
             print('Saving to {}'.format(filename))
             save_data = {'frame_ids': selected_views}
             with open(filename, 'w') as file:
@@ -256,11 +266,11 @@ if __name__ == '__main__':
     args.mask_dir = '/home/tpatten/Data/Hands/HO3D_V2/HO3D_v2_segmentations_rendered/'
     args.hand_obj_rendering_scores = '/home/tpatten/Data/bop/ho3d/hand_obj_ren_scores.json'
     args.visualize = False
-    args.save = True
+    args.save = False
     args.min_num_pixels = 8000
-    args.view_step_size = 0.4
+    args.view_step_size = 0.3
     args.selection_type = SelectionType.Uniform  # 1: SelectionType.Uniform, 2: SelectionType.Greedy
-    args.score_type = ViewScore.Rendering  # 1: ViewScore.Rendering, 2: ViewScore.Segmentation
+    args.score_type = ViewScore.Segmentation  # 1: ViewScore.Rendering, 2: ViewScore.Segmentation
 
     # Create viewpoint selector
     view_selector = ViewpointSelector(args)

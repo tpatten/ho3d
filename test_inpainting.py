@@ -7,6 +7,7 @@ import open3d as o3d
 
 from bop_toolkit_lib import renderer
 import trimesh
+import copy
 
 
 data_split = 'train'
@@ -301,14 +302,41 @@ def depth_to_cloud(depth, cam_intrinsics):
     for v in range(depth.shape[0]):
         for u in range(depth.shape[1]):
             z = depth[v, u]
-            x = (u - cx) * z * i_fx
-            y = (v - cy) * z * i_fy
-            pts.append([x, y, z])
+            if z > 0.01 and z < 1.0:
+                x = (u - cx) * z * i_fx
+                y = (v - cy) * z * i_fy
+                pts.append([x, y, z])
 
     cloud = o3d.geometry.PointCloud()
     cloud.points = o3d.utility.Vector3dVector(np.asarray(pts))
 
     return cloud
+
+
+def remove_outliers(cloud, outlier_rm_nb_neighbors=0., outlier_rm_std_ratio=0.,
+                    raduis_rm_min_nb_points=0, raduis_rm_radius=0.):
+    # Copy the input cloud
+    in_cloud = copy.deepcopy(cloud)
+
+    if o3d.__version__ == "0.7.0.0":
+        # Statistical outlier removal
+        if outlier_rm_nb_neighbors > 0 and outlier_rm_std_ratio > 0:
+            in_cloud, _ = o3d.geometry.statistical_outlier_removal(
+                in_cloud, nb_neighbors=outlier_rm_nb_neighbors, std_ratio=outlier_rm_std_ratio)
+        # Radius outlier removal
+        if raduis_rm_min_nb_points > 0 and raduis_rm_radius > 0:
+            in_cloud, _ = o3d.geometry.radius_outlier_removal(
+                in_cloud, nb_points=raduis_rm_min_nb_points, radius=raduis_rm_radius)
+    else:
+        # Statistical outlier removal
+        if outlier_rm_nb_neighbors > 0 and outlier_rm_std_ratio > 0:
+            in_cloud, _ = in_cloud.remove_statistical_outlier(
+                nb_neighbors=outlier_rm_nb_neighbors, std_ratio=outlier_rm_std_ratio)
+        # Radius outlier removal
+        if raduis_rm_min_nb_points > 0 and raduis_rm_radius > 0:
+            in_cloud, _ = in_cloud.remove_radius_outlier(nb_points=raduis_rm_min_nb_points, radius=raduis_rm_radius)
+
+    return in_cloud
 
 
 if __name__ == '__main__':
@@ -319,15 +347,17 @@ if __name__ == '__main__':
     args.ho3d_path = '/home/tpatten/v4rtemp/datasets/HandTracking/HO3D_v2'
     args.mask_dir = '/home/tpatten/Data/Hands/HO3D_V2/HO3D_v2_segmentations_rendered/'
     args.scene = 'ABF10'
+    args.model_render = False
 
-    width = 640
-    height = 480
-    renderer_modalities = []
-    renderer_modalities.append('rgb')
-    renderer_modalities.append('depth')
-    renderer_mode = '+'.join(renderer_modalities)
-    ren = renderer.create_renderer(width, height, 'python', mode=renderer_mode, shading='flat')
-    add_objects_to_renderer(ren)
+    if args.model_render:
+        width = 640
+        height = 480
+        renderer_modalities = []
+        renderer_modalities.append('rgb')
+        renderer_modalities.append('depth')
+        renderer_mode = '+'.join(renderer_modalities)
+        ren = renderer.create_renderer(width, height, 'python', mode=renderer_mode, shading='flat')
+        add_objects_to_renderer(ren)
 
     frame_ids = sorted(os.listdir(os.path.join(args.ho3d_path, data_split, args.scene, 'rgb')))
     for i in range(500, len(frame_ids)):
@@ -340,32 +370,20 @@ if __name__ == '__main__':
         # Load the object pose
         obj_id, object_mesh, object_pose, camK = load_object_and_pose(args.ho3d_path, args.scene, frame_id)
 
-        # rendered_depth = get_depth_voxel(object_mesh, object_pose, camK, depth.shape)
-        rendered_depth = render_depth(obj_id, object_pose, camK)
+        if args.model_render:
+            rendered_depth = render_depth(obj_id, object_pose, camK)
+            # rendered_depth = get_depth_voxel(object_mesh, object_pose, camK, depth.shape)
 
         # Mask the image
         depth_masked = apply_mask(depth, mask_obj)
 
+        '''
         img_output = np.hstack((depth, depth_masked))
         img_output = np.hstack((img_output, rendered_depth))
         cv2.imshow('Depth image', img_output)
         cv2.waitKey(0)
-
-        '''
-        # Create visualizer
-        vis = o3d.visualization.Visualizer()
-        vis.create_window()
-        depth_cloud = depth_to_cloud(depth_masked, camK)
-        depth_cloud.paint_uniform_color([0.9, 0.4, 0.4])
-        vis.add_geometry(depth_cloud)
-        rendered_cloud = depth_to_cloud(rendered_depth, camK)
-        rendered_cloud.paint_uniform_color([0.4, 0.9, 0.4])
-        vis.add_geometry(rendered_cloud)
-        vis.run()
-        vis.destroy_window()
-        '''
-
         sys.exit(0)
+        '''
 
         # Compute the inpaint mask as any pixel in the object mask that does not have a valid value
         # (either missing as NaN or removed because value too large)
@@ -374,6 +392,7 @@ if __name__ == '__main__':
         # Get inpainted depth image
         depth_inpainted1 = inpaint(depth_masked, mask=inpaint_mask1)
 
+        '''
         # Inpaint the hand pixels
         inpaint_mask2 = np.multiply((mask_hand == 255), (depth_masked == 0)).astype(np.uint8)
         depth_inpainted2 = inpaint2(depth_inpainted1, mask=inpaint_mask2)
@@ -411,3 +430,31 @@ if __name__ == '__main__':
         cv2.imshow('Depth image', img_output)
         cv2.waitKey(0)
         # cv2.destroyAllWindows()
+        '''
+
+        cloud = depth_to_cloud(depth_inpainted1, camK)
+        outlier_rm_nb_neighbors = 250  # Higher is more aggressive
+        outlier_rm_std_ratio = 0.00001  # Smaller is more aggressive
+        raduis_rm_min_nb_points = 250  # Don't change
+        raduis_rm_radius_factor = 10  # Don't change
+        voxel_size = 0.001
+        print('==> Removing outliers')
+        print('Input points: {}'.format(np.asarray(cloud.points).shape[0]))
+        cloud = remove_outliers(cloud,
+                                outlier_rm_nb_neighbors=outlier_rm_nb_neighbors,
+                                outlier_rm_std_ratio=outlier_rm_std_ratio,
+                                raduis_rm_min_nb_points=0, raduis_rm_radius=0)
+                                # raduis_rm_min_nb_points=raduis_rm_min_nb_points,
+                                # raduis_rm_radius=voxel_size * raduis_rm_radius_factor)
+        print('Output points: {}'.format(np.asarray(cloud.points).shape[0]))
+        o3d.io.write_point_cloud('/home/tpatten/Data/cloud.ply', cloud)
+        # Ball pivoting
+        print('==> Computing normals')
+        cloud.estimate_normals(search_param=o3d.geometry.KDTreeSearchParamHybrid(radius=0.1, max_nn=30))
+        print('==> Generating mesh')
+        radii = np.asarray([0.005, 0.01, 0.02, 0.04])
+        mesh_recon = o3d.geometry.TriangleMesh.create_from_point_cloud_ball_pivoting(
+            cloud, o3d.utility.DoubleVector(radii))
+        o3d.io.write_triangle_mesh('/home/tpatten/Data/mesh.ply', mesh_recon)
+
+        sys.exit(0)

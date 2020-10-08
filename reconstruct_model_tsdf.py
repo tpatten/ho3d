@@ -46,6 +46,8 @@ class ModelReconstructor:
             self.erosion_kernel = None
         self.volume = None
 
+        self.test_func()
+
         # Load the rendering scores file
         if os.path.isfile(self.args.hand_obj_rendering_scores):
             with open(self.args.hand_obj_rendering_scores) as json_file:
@@ -105,6 +107,10 @@ class ModelReconstructor:
                     if self.args.apply_inpainting:
                         filename += '_inPaint'
                     filename += '_clean.xyz'
+                    if self.args.viewpoint_file != '':
+                        filename = os.path.join(self.base_dir, self.data_split,
+                                                self.args.scene + '_' + str(self.args.viewpoint_file).split('.')[0] +
+                                                '_clean.xyz')
                 else:
                     filename = self.args.model_file.split('.')[0]
                     if self.mask_dir != OBJECT_MASK_VISIBLE_DIR:
@@ -119,6 +125,98 @@ class ModelReconstructor:
 
                 #print('Saving to: {}'.format(filename.replace('.xyz', '.ply')))
                 #o3d.io.write_point_cloud(filename.replace('.xyz', '.ply'), loaded_pcd)
+
+    def test_func(self):
+        # Load two of the images
+        scene_id = 'ABF10'
+        frame_ids = ['0090', '0514', '1055']
+        poses = [np.eye(4),
+                 np.asarray([0.62578040423448, 0.6975679028668021, -0.34899556811819804, 0.13193419399246284,
+                             -0.5044116046496037, 0.7031957775374543, 0.5010834576677885, -0.15048727462816902,
+                             0.594951946606566, -0.13753079416445993, 0.7919074831604712, 0.17977535288721627,
+                             0.0, 0.0, 0.0, 1.0]).reshape((4, 4)),
+                 np.asarray([-0.14613412359310565, -0.9361789072739534, 0.3197090419381649, -0.05513735799376178,
+                             -0.9823675359963918, 0.099231970655764, -0.15845201235752068, 0.16534490025361823,
+                             0.1166140735162308, -0.3372270297219925, -0.9341729434547074, 0.9158804802458833,
+                             0.0, 0.0, 0.0, 1.0]).reshape((4, 4))]
+
+        use_gt = False
+        do_inv = False
+        do_coord_change = True
+        aligned_clouds = []
+        for i in range(len(frame_ids)):
+            # Read image, depths maps and annotations
+            self.rgb, self.depth, self.anno, _ = self.load_data(scene_id, frame_ids[i])
+            # Read the mask
+            mask, mask_hand = self.load_mask(scene_id, frame_ids[i])
+            # Extract the masked point cloud
+            cloud, colors = self.image_to_world(mask, cut_z=2.0)
+
+            # Transform the cloud and get the camera position
+            if use_gt:
+                obj_trans = np.copy(self.anno['objTrans'])
+                if do_coord_change:
+                    obj_trans = obj_trans.dot(COORD_CHANGE_MAT.T)
+                obj_rot = np.copy(self.anno['objRot'])
+                if do_coord_change:
+                    obj_rot = obj_rot.flatten().dot(COORD_CHANGE_MAT.T).reshape(self.anno['objRot'].shape)
+                rot_max = cv2.Rodrigues(obj_rot)[0].T
+                # print(obj_rot)
+                # print(rot_max)
+                # print(cv2.Rodrigues(rot_max)[0])
+
+                cloud_tfd = np.copy(cloud)
+                cloud_tfd -= obj_trans
+                cloud_tfd = np.matmul(cloud_tfd, np.linalg.inv(rot_max))
+            else:
+                t_mat = poses[i]
+                obj_trans = t_mat[:3, 3].reshape((3,))
+                rot_max = t_mat[:3, :3]
+
+                if do_coord_change:
+                    # rotx = np.eye(4)
+                    # from scipy.spatial.transform.rotation import Rotation
+                    # rotx[:3, :3] = Rotation.from_euler('x', 180, degrees=True).as_dcm()
+                    # pose = np.eye(4)
+                    # pose[:3, :3] = rot_max
+                    # pose[:3, 3] = obj_trans
+                    # obj_trans = pose[:3, 3].reshape((3,))
+                    # rot_max = pose[:3, :3]
+
+                    obj_trans = obj_trans.dot(COORD_CHANGE_MAT.T)
+                    obj_rot = cv2.Rodrigues(rot_max)[0]
+                    obj_rot = obj_rot.flatten().dot(COORD_CHANGE_MAT.T).reshape(obj_rot.shape)
+                    rot_max = cv2.Rodrigues(obj_rot)[0].T
+
+                if not do_inv:
+                    cloud_tfd = np.copy(cloud)
+                    cloud_tfd += obj_trans
+                    cloud_tfd = np.matmul(cloud_tfd, rot_max)
+                else:
+                    cloud_tfd = np.copy(cloud)
+                    cloud_tfd -= obj_trans
+                    cloud_tfd = np.matmul(cloud_tfd, np.linalg.inv(rot_max))
+            vis_pcd = o3d.geometry.PointCloud()
+            vis_pcd.points = o3d.utility.Vector3dVector(cloud_tfd)
+            if i == 0:
+                vis_pcd.paint_uniform_color([0.9, 0.1, 0.1])
+            elif i == 1:
+                vis_pcd.paint_uniform_color([0.1, 0.9, 0.1])
+            elif i == 2:
+                vis_pcd.paint_uniform_color([0.1, 0.1, 0.9])
+            else:
+                vis_pcd.colors = o3d.utility.Vector3dVector(colors)
+            aligned_clouds.append(vis_pcd)
+
+        # Visualize
+        vis = o3d.visualization.Visualizer()
+        vis.create_window()
+        for c in aligned_clouds:
+            vis.add_geometry(c)
+        vis.run()
+        vis.destroy_window()
+
+        sys.exit(0)
 
     def reconstruct_object_model(self):
         # If the input scene contains digit identifier, then it is the only subdir
@@ -186,6 +284,28 @@ class ModelReconstructor:
         # Get the scene ids
         frame_ids = sorted(os.listdir(os.path.join(self.base_dir, self.data_split, scene_id, 'rgb')))
 
+        # If using given viewpoints
+        if self.args.viewpoint_file != '':
+            # print(frame_ids)
+            filename = os.path.join(self.base_dir, self.data_split, scene_id, self.args.viewpoint_file)
+            if os.path.isfile(filename):
+                with open(filename) as json_file:
+                    frame_ids = json.load(json_file)['frame_ids']
+                frame_ids = sorted([f.zfill(4) + '.png' for f in frame_ids])
+            # print(frame_ids)
+            self.args.skip = 1
+            self.args.max_num = -1
+
+        # If using annotated poses
+        relative_poses = None
+        if self.args.pose_annotation_file != '':
+            filename = os.path.join(self.base_dir, self.data_split, scene_id, self.args.pose_annotation_file)
+            if os.path.isfile(filename):
+                with open(filename) as json_file:
+                    relative_poses = json.load(json_file)
+                frame_ids = relative_poses.keys()
+                frame_ids = sorted([f.zfill(4) + '.png' for f in frame_ids])
+
         # Load the camera parameters
         cam_params = self.read_camera_intrinsics(scene_id)
 
@@ -216,7 +336,7 @@ class ModelReconstructor:
                 print('[{}/{}] Processing file {}'.format(num_processed, self.args.max_num, meta_filename))
 
             # Check this is a validly annotated frame
-            if scene_rendering_scores is not None:
+            if scene_rendering_scores is not None and args.viewpoint_file == '':
                 frame_id_key = str(int(frame_id))
                 # [0] num_rendered, [1] visible_of_rendered, [2] valid_of_rendered, [3] valid_of_visible
                 # Number of pixels of the object must be more than min_num_pixels
@@ -262,7 +382,8 @@ class ModelReconstructor:
                 continue
 
             # Transform the cloud and get the camera position
-            cloud, cam_pose, est_cloud, est_cam_pose = self.transform_to_object_frame(cloud)
+            cloud, cam_pose, est_cloud, est_cam_pose = self.transform_to_object_frame(
+                cloud, pose_in_frames=relative_poses, frame_id=str(int(frame_id)))
 
             # Create the point cloud for visualization
             mask_pcd = o3d.geometry.PointCloud()
@@ -339,6 +460,9 @@ class ModelReconstructor:
 
             # Exit if reached the limit
             if self.args.max_num > 0 and num_processed == self.args.max_num:
+                break
+
+            if counter > 3:
                 break
 
             # Save intermediate results
@@ -578,21 +702,58 @@ class ModelReconstructor:
 
         return img_out
 
-    def transform_to_object_frame(self, cloud):
+    def transform_to_object_frame(self, cloud, pose_in_frames=None, frame_id=None):
         # Get the ground truth transformation
-        obj_trans = np.copy(self.anno['objTrans'])
-        obj_trans = obj_trans.dot(COORD_CHANGE_MAT.T)
-        obj_rot = np.copy(self.anno['objRot'])
-        obj_rot = obj_rot.flatten().dot(COORD_CHANGE_MAT.T).reshape(self.anno['objRot'].shape)
-        rot_max = cv2.Rodrigues(obj_rot)[0].T
+        if pose_in_frames is None or frame_id not in pose_in_frames:
+            # print('Object pose not provided for frame {}'.format(frame_id))
+            obj_trans = np.copy(self.anno['objTrans'])
+            # print('obj_trans.shape {}'.format(obj_trans.shape))
+            obj_trans = obj_trans.dot(COORD_CHANGE_MAT.T)
+            # print('obj_trans.shape {}'.format(obj_trans.shape))
+            obj_rot = np.copy(self.anno['objRot'])
+            # print('obj_rot.shape {}'.format(obj_rot.shape))
+            obj_rot = obj_rot.flatten().dot(COORD_CHANGE_MAT.T).reshape(self.anno['objRot'].shape)
+            # print('obj_rot.shape {}'.format(obj_rot.shape))
+            rot_max = cv2.Rodrigues(obj_rot)[0].T
+            # print('rot_max.shape {}'.format(rot_max.shape))
 
-        cloud_tfd = np.copy(cloud)
-        cloud_tfd -= obj_trans
-        cloud_tfd = np.matmul(cloud_tfd, np.linalg.inv(rot_max))
+            cloud_tfd = np.copy(cloud)
+            cloud_tfd -= obj_trans
+            cloud_tfd = np.matmul(cloud_tfd, np.linalg.inv(rot_max))
 
-        cam_pose = np.eye(4)
-        cam_pose[:3, :3] = rot_max
-        cam_pose[:3, 3] = np.matmul(-obj_trans, np.linalg.inv(rot_max))
+            cam_pose = np.eye(4)
+            cam_pose[:3, :3] = rot_max
+            cam_pose[:3, 3] = np.matmul(-obj_trans, np.linalg.inv(rot_max))
+
+        else:
+            t_mat = np.asarray(pose_in_frames[frame_id]).reshape((4, 4))
+            obj_trans = t_mat[:3, 3].reshape((3,))
+            rot_max = t_mat[:3, :3]
+
+            rotx = np.eye(4)
+            from scipy.spatial.transform.rotation import Rotation
+            rotx[:3, :3] = Rotation.from_euler('x', 180, degrees=True).as_dcm()
+            pose = np.eye(4)
+            pose[:3, :3] = rot_max
+            pose[:3, 3] = obj_trans
+            obj_trans = pose[:3, 3].reshape((3,))
+            rot_max = pose[:3, :3]
+
+            do_inv = True
+            if not do_inv:
+                cloud_tfd = np.copy(cloud)
+                cloud_tfd += obj_trans
+                cloud_tfd = np.matmul(cloud_tfd, rot_max)
+                cam_pose = np.eye(4)
+                cam_pose[:3, :3] = rot_max
+                cam_pose[:3, 3] = np.matmul(obj_trans, rot_max)
+            else:
+                cloud_tfd = np.copy(cloud)
+                cloud_tfd -= obj_trans
+                cloud_tfd = np.matmul(cloud_tfd, np.linalg.inv(rot_max))
+                cam_pose = np.eye(4)
+                cam_pose[:3, :3] = rot_max
+                cam_pose[:3, 3] = np.matmul(-obj_trans, np.linalg.inv(rot_max))
 
         if self.args.reg_method == RegMethod.GT or self.prev_cloud is None:
             return cloud_tfd, cam_pose, cloud_tfd, cam_pose
@@ -734,8 +895,12 @@ class ModelReconstructor:
             filename += '_frame' + str(frame_id)
         filename += '.xyz'
 
+        if self.args.viewpoint_file != '':
+            filename = os.path.join(self.base_dir, self.data_split,
+                                    self.args.scene + '_' + str(self.args.viewpoint_file).split('.')[0] + '.xyz')
+
         if down_pcd is not None:
-            print('Saving to: {}'.format(filename))
+            #print('Saving to: {}'.format(filename))
             #f = open(filename, "w")
             #for i in range(len(points)):
             #    f.write('{} {} {} {} {} {}\n'.format(points[i, 0], points[i, 1], points[i, 2],
@@ -743,11 +908,13 @@ class ModelReconstructor:
             #f.close()
 
             # Write at .ply
-            #o3d.io.write_point_cloud(filename.replace('.xyz', '.ply'), down_pcd)
+            print('Saving to: {}'.format(filename.replace('.xyz', '.ply')))
+            o3d.io.write_point_cloud(filename.replace('.xyz', '.ply'), down_pcd)
 
         # Write the mesh as .ply
         filename = filename.replace('.xyz', '')
-        filename += '_visRatio' + str(self.args.min_ratio_valid).replace('.', '-')
+        if self.args.viewpoint_file == '':
+            filename += '_visRatio' + str(self.args.min_ratio_valid).replace('.', '-')
         filename += '_tsdf.ply'
         print('Saving to: {}'.format(filename))
         o3d.io.write_triangle_mesh(filename, mesh)
@@ -825,7 +992,7 @@ if __name__ == '__main__':
     # Parse the arguments
     parser = argparse.ArgumentParser(description='HO-3D Object model reconstruction')
     parser.add_argument("scene", type=str, help="Sequence of the dataset")
-    parser.add_argument("min_ratio_valid", type=float, help="The threshold at which visibility is set")
+    parser.add_argument("--min_ratio_valid", type=float, default=0.1, help="The threshold at which visibility is set")
     args = parser.parse_args()
     # args.ho3d_path = '/home/tpatten/Data/Hands/HO3D/'
     args.ho3d_path = '/home/tpatten/v4rtemp/datasets/HandTracking/HO3D_v2'
@@ -834,8 +1001,10 @@ if __name__ == '__main__':
     # args.mask_dir = OBJECT_MASK_VISIBLE_DIR
     args.mask_dir = '/home/tpatten/Data/Hands/HO3D_V2/HO3D_v2_segmentations_rendered/'
     args.hand_obj_rendering_scores = '/home/tpatten/Data/bop/ho3d/hand_obj_ren_scores.json'
-    args.visualize = False
-    args.save = True
+    args.viewpoint_file = 'views_Uniform_Segmentation_step0-3.json'
+    args.pose_annotation_file = 'pose_hand_annotation.json'
+    args.visualize = True
+    args.save = False
     args.save_intermediate = False
     args.icp_method = ICPMethod.Point2Plane
     # Point2Point=1, Point2Plane=2
