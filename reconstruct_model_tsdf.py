@@ -15,6 +15,7 @@ OBJECT_MASK_VISIBLE_DIR = 'object_vis'
 COORD_CHANGE_MAT = np.array([[1., 0., 0.], [0, -1., 0.], [0., 0., -1.]], dtype=np.float32)
 ICP_THRESH = 0.02
 RANSAC_THRESH = 0.015
+YCB_MODELS_DIR = '/home/tpatten/Data/Hands/HO3D_V2/HO3D_v2/'
 
 
 class ICPMethod(IntEnum):
@@ -46,7 +47,8 @@ class ModelReconstructor:
             self.erosion_kernel = None
         self.volume = None
 
-        self.test_func()
+        # TODO: Come back to testing poses from Kiru's annotation tool
+        # self.test_func()
 
         # Load the rendering scores file
         if os.path.isfile(self.args.hand_obj_rendering_scores):
@@ -54,6 +56,19 @@ class ModelReconstructor:
                 self.hand_obj_rendering_scores = json.load(json_file)
         else:
             self.hand_obj_rendering_scores = None
+
+        # Load models in the renderer
+        self.renderer = None
+        if self.args.inpaint_with_rendering:
+            from bop_toolkit_lib import renderer
+            width = 640
+            height = 480
+            renderer_modalities = []
+            renderer_modalities.append('rgb')
+            renderer_modalities.append('depth')
+            renderer_mode = '+'.join(renderer_modalities)
+            self.renderer = renderer.create_renderer(width, height, 'python', mode=renderer_mode, shading='flat')
+            self.add_objects_to_renderer()
 
         # Reconstruct the model
         loaded_pcd = None
@@ -82,6 +97,7 @@ class ModelReconstructor:
                                          outlier_rm_std_ratio=0.01,
                                          raduis_rm_min_nb_points=0, raduis_rm_radius=0)
 
+            print('Visualizing loaded pcd...')
             self.visualize(mask_pcds=[loaded_pcd])
             # self.visualize(mask_pcds=[self.load_object_model(self.args.model_file)])
 
@@ -100,21 +116,25 @@ class ModelReconstructor:
                         filename += '_' + str(self.args.icp_method).split('.')[1]
                     filename += '_start' + str(self.args.start_frame) + '_max' + str(self.args.max_num) + \
                                 '_skip' + str(self.args.skip)
-                    if self.mask_dir != OBJECT_MASK_VISIBLE_DIR:
-                        filename += '_segHO3D'
+                    #if self.mask_dir != OBJECT_MASK_VISIBLE_DIR:
+                    #    filename += '_segHO3D'
                     if self.hand_obj_rendering_scores is not None:
                         filename += '_renFilter'
-                    if self.args.apply_inpainting:
-                        filename += '_inPaint'
-                    filename += '_clean.xyz'
+
                     if self.args.viewpoint_file != '':
                         filename = os.path.join(self.base_dir, self.data_split,
-                                                self.args.scene + '_' + str(self.args.viewpoint_file).split('.')[0] +
-                                                '_clean.xyz')
+                                                self.args.scene + '_' + str(self.args.viewpoint_file).split('.')[0])
+
+                    if self.args.apply_inpainting:
+                        filename += '_inPaint'
+                    if self.args.inpaint_with_rendering:
+                        filename += 'Rend'
+
+                    filename += '_clean.xyz'
                 else:
                     filename = self.args.model_file.split('.')[0]
-                    if self.mask_dir != OBJECT_MASK_VISIBLE_DIR:
-                        filename += '_segHO3D'
+                    #if self.mask_dir != OBJECT_MASK_VISIBLE_DIR:
+                    #    filename += '_segHO3D'
                     filename += '_clean.xyz'
                 print('Saving to: {}'.format(filename))
                 #f = open(filename, "w")
@@ -150,7 +170,7 @@ class ModelReconstructor:
             # Read the mask
             mask, mask_hand = self.load_mask(scene_id, frame_ids[i])
             # Extract the masked point cloud
-            cloud, colors = self.image_to_world(mask, cut_z=2.0)
+            cloud, colors = self.image_to_world(self.rgb, self.depth, mask, cut_z=2.0)
 
             # Transform the cloud and get the camera position
             if use_gt:
@@ -259,10 +279,12 @@ class ModelReconstructor:
         # Visualize
         if self.args.visualize:
             scene_pcds = None
+            print('Visualizing aligned clouds...')
             if self.args.reg_method == RegMethod.GT:
                 self.visualize(cam_poses, mask_pcds, scene_pcds=scene_pcds)
             else:
                 self.visualize(est_cam_poses, mask_pcds, scene_pcds=scene_pcds, gt_poses=cam_poses)
+            print('Visualizing TSDF volume...')
             self.visualize_volume(tsdf_mesh)
 
         if combined_pcd is None:
@@ -286,13 +308,11 @@ class ModelReconstructor:
 
         # If using given viewpoints
         if self.args.viewpoint_file != '':
-            # print(frame_ids)
             filename = os.path.join(self.base_dir, self.data_split, scene_id, self.args.viewpoint_file)
             if os.path.isfile(filename):
                 with open(filename) as json_file:
                     frame_ids = json.load(json_file)['frame_ids']
                 frame_ids = sorted([f.zfill(4) + '.png' for f in frame_ids])
-            # print(frame_ids)
             self.args.skip = 1
             self.args.max_num = -1
 
@@ -374,8 +394,39 @@ class ModelReconstructor:
                 counter += self.args.skip
                 continue
 
+            masked_rgb = self.apply_mask(self.rgb, mask)
+            masked_depth = self.apply_mask(self.depth, mask)
+
+            # Inpaint the depth image
+            if self.args.apply_inpainting:
+                if self.args.inpaint_with_rendering:
+                    # Render the depth from the model
+                    rendered_depth = self.render_depth(cam_params)
+                    # Fill the missing values with rendered depth values
+                    masked_depth = self.fill_from_rendering(masked_depth, rendered_depth)
+                    self.depth = masked_depth
+                    mask = None
+                else:
+                    inpainted_depth = self.get_inpainted_depth(masked_depth, mask, mask_hand)
+                    masked_depth = inpainted_depth
+                # if self.args.inpaint_with_rendering:
+                #    right_img = rendered_depth
+                # else:
+                #    right_img = cv2.cvtColor(self.rgb, cv2.COLOR_RGB2GRAY)
+                # img_output = np.vstack((np.hstack((self.depth, right_img)),
+                #                        np.hstack((masked_depth, inpainted_depth))))
+                # cv2.imshow('Depth image', img_output)
+                # cv2.waitKey(0)
+                # cv2.destroyAllWindows()
+
+                #masked_depth = inpainted_depth
+                #masked_depth = rendered_depth
+                #self.depth = rendered_depth
+                #mask = None
+
             # Extract the masked point cloud
-            cloud, colors = self.image_to_world(mask, cut_z=np.linalg.norm(self.anno['objTrans']) * 1.1)
+            cloud, colors = self.image_to_world(self.rgb, self.depth, mask,
+                                                cut_z=np.linalg.norm(self.anno['objTrans']) * 1.1)
             if cloud.shape[0] == 0:
                 print('Empty cloud for frame {}'.format(frame_id))
                 counter += self.args.skip
@@ -395,14 +446,25 @@ class ModelReconstructor:
             # mask_pcd.transform([[1, 0, 0, 0], [0, -1, 0, 0], [0, 0, -1, 0], [0, 0, 0, 1]])
 
             # Remove outliers
-            mask_pcd = remove_outliers(mask_pcd,
-                                       outlier_rm_nb_neighbors=self.args.outlier_rm_nb_neighbors,
-                                       outlier_rm_std_ratio=self.args.outlier_rm_std_ratio,
-                                       raduis_rm_min_nb_points=self.args.raduis_rm_min_nb_points,
-                                       raduis_rm_radius=self.args.voxel_size * self.args.raduis_rm_radius_factor)
-            # mask_pcd = remove_outliers(mask_pcd,
-            #                           outlier_rm_nb_neighbors=self.args.outlier_rm_nb_neighbors,
-            #                           outlier_rm_std_ratio=self.args.outlier_rm_std_ratio)
+            if not self.args.inpaint_with_rendering:
+                mask_pcd = remove_outliers(mask_pcd,
+                                           outlier_rm_nb_neighbors=self.args.outlier_rm_nb_neighbors,
+                                           outlier_rm_std_ratio=self.args.outlier_rm_std_ratio,
+                                           raduis_rm_min_nb_points=self.args.raduis_rm_min_nb_points,
+                                           raduis_rm_radius=self.args.voxel_size * self.args.raduis_rm_radius_factor)
+
+                # mask_pcd = remove_outliers(mask_pcd,
+                #                           outlier_rm_nb_neighbors=self.args.outlier_rm_nb_neighbors,
+                #                           outlier_rm_std_ratio=self.args.outlier_rm_std_ratio)
+
+            # Add to SDF volume
+            if self.args.construct_tsdf:
+                masked_rgb_tsdf = o3d.geometry.Image(masked_rgb)
+                masked_depth_tsdf = o3d.geometry.Image((masked_depth * 1000).astype(np.float32))
+                rgbd = o3d.geometry.create_rgbd_image_from_color_and_depth(
+                    masked_rgb_tsdf, masked_depth_tsdf, depth_trunc=self.args.sdf_depth_trunc,
+                    convert_rgb_to_intensity=False)
+                self.volume.integrate(rgbd, cam_params, np.linalg.inv(cam_pose))
 
             # Add to lists
             cam_poses.append(cam_pose)
@@ -410,34 +472,6 @@ class ModelReconstructor:
             mask_pcds.append(mask_pcd)
             scene_pcds.append(scene_pcd)
             processed_frames.append(frame_id)
-
-            # Add to SDF volume
-            if self.args.construct_tsdf:
-                masked_rgb = self.apply_mask(self.rgb, mask)
-                masked_depth = self.apply_mask(self.depth, mask)
-
-                # Inpaint the depth image
-                if self.args.apply_inpainting:
-                    '''
-                    dep_shape = masked_depth.shape
-                    masked_depth = masked_depth.flatten()
-                    # Mask out values that have too large depth values
-                    for v in range(len(masked_depth)):
-                        if masked_depth[v] > self.args.max_depth_tsdf:
-                            masked_depth[v] = 0
-                    masked_depth = masked_depth.reshape(dep_shape)
-                    # Get the mask that needs to be inpainted
-                    inpaint_mask = np.multiply((mask == 255), (masked_depth == 0)).astype(np.uint8)
-                    # Inpaint the depth image
-                    masked_depth = self.inpaint(masked_depth, mask=inpaint_mask)
-                    '''
-                    masked_depth = self.get_inpainted_depth(masked_depth, mask, mask_hand)
-
-                masked_rgb = o3d.geometry.Image(masked_rgb)
-                masked_depth = o3d.geometry.Image((masked_depth * 1000).astype(np.float32))
-                rgbd = o3d.geometry.create_rgbd_image_from_color_and_depth(
-                    masked_rgb, masked_depth, depth_trunc=self.args.sdf_depth_trunc, convert_rgb_to_intensity=False)
-                self.volume.integrate(rgbd, cam_params, np.linalg.inv(cam_pose))
 
             # Increment counters
             counter += self.args.skip
@@ -462,8 +496,8 @@ class ModelReconstructor:
             if self.args.max_num > 0 and num_processed == self.args.max_num:
                 break
 
-            if counter > 3:
-                break
+            #if counter > 3:
+            #    break
 
             # Save intermediate results
             if self.args.save and self.args.save_intermediate and num_processed % 20 == 0:
@@ -537,6 +571,36 @@ class ModelReconstructor:
 
         return mask, hand
 
+    def render_depth(self, cam_intrinsics):
+        pose = np.eye(4)
+        pose[:3, :3] = cv2.Rodrigues(self.anno['objRot'])[0]
+        pose[:3, 3] = self.anno['objTrans']
+
+        # From OpenGL coordinates
+        from scipy.spatial.transform.rotation import Rotation
+        rotx = np.eye(4)
+        rotx[:3, :3] = Rotation.from_euler('x', 180, degrees=True).as_dcm()
+        # pose = rotx @ pose
+        pose = np.matmul(rotx, pose)
+
+        # fx, fy, cx, cy = cam_intrinsics[0, 0], cam_intrinsics[1, 1], cam_intrinsics[0, 2], cam_intrinsics[1, 2]
+        fx, fy = cam_intrinsics.get_focal_length()
+        cx, cy = cam_intrinsics.get_principal_point()
+        rendering = self.renderer.render_object(self.anno['objName'], pose[:3, :3], pose[:3, 3], fx, fy, cx, cy)
+        depth = rendering['depth']
+
+        return depth
+
+    def add_objects_to_renderer(self):
+        # Get all the .ply files in the model directory
+        # model_dir_name = 'models'
+        model_dir_name = 'reconstructions'
+        obj_ids = sorted(os.listdir(os.path.join(YCB_MODELS_DIR, model_dir_name)))
+        for obj_id in obj_ids:
+            model_path = os.path.join(os.path.join(YCB_MODELS_DIR, model_dir_name), obj_id, 'mesh.ply')
+            print('model_path', model_path)
+            self.renderer.add_object(obj_id.replace('.ply', ''), model_path, surf_color=None)
+
     def read_camera_intrinsics(self, seq_name):
         cam_params = o3d.camera.PinholeCameraIntrinsic(o3d.camera.PinholeCameraIntrinsicParameters.PrimeSenseDefault)
         cam_mat = np.zeros((3, 3))
@@ -560,7 +624,21 @@ class ModelReconstructor:
 
         return cam_params
 
-    def image_to_world(self, mask=None, cut_z=1000.):
+    @staticmethod
+    def fill_from_rendering(depth, rendered_depth):
+        filled_depth = np.copy(depth).flatten()
+        rendered_depth = rendered_depth.flatten()
+        for i in range(len(rendered_depth)):
+            if filled_depth[i] == 0 and rendered_depth[i] > 0:
+                filled_depth[i] = rendered_depth[i]
+
+        # Reshape back to input shape
+        filled_depth = filled_depth.reshape(depth.shape)
+        rendered_depth = rendered_depth.reshape(rendered_depth.shape)
+
+        return filled_depth
+
+    def image_to_world(self, rgb, depth, mask=None, cut_z=1000.):
         i_fx = 1. / self.anno['camMat'][0, 0]
         i_fy = 1. / self.anno['camMat'][1, 1]
         cx = self.anno['camMat'][0, 2]
@@ -568,15 +646,15 @@ class ModelReconstructor:
 
         pts = []
         colors = []
-        for v in range(self.rgb.shape[0]):
-            for u in range(self.rgb.shape[1]):
+        for v in range(rgb.shape[0]):
+            for u in range(rgb.shape[1]):
                 if mask is None or mask[v, u] > 0:
-                    z = self.depth[v, u]
+                    z = depth[v, u]
                     if z > 0.001 and z < cut_z:
                         x = (u - cx) * z * i_fx
                         y = (v - cy) * z * i_fy
                         pts.append([x, y, z])
-                        colors.append(self.rgb[v, u])
+                        colors.append(rgb[v, u])
 
         pts = np.asarray(pts)
         colors = np.asarray(colors) / 255
@@ -617,6 +695,7 @@ class ModelReconstructor:
         # Inpaint the depth image
         inpainted_depth = self.inpaint(masked_depth, mask=inpaint_mask)
 
+        '''
         # Inpaint the hand pixels
         if mask_hand is not None:
             inpaint_mask_hand = np.multiply((mask_hand == 255), (masked_depth == 0)).astype(np.uint8)
@@ -627,6 +706,7 @@ class ModelReconstructor:
             mask_closed = cv2.morphologyEx(mask_morph, cv2.MORPH_CLOSE, np.ones((20, 20), np.uint8))
             inpaint_mask_morph = ((mask_closed - mask_morph) == 1).astype(np.uint8)
             inpainted_depth = self.depth_fill(inpainted_depth, mask=inpaint_mask_morph)
+        '''
 
         return inpainted_depth
 
@@ -885,19 +965,24 @@ class ModelReconstructor:
             filename += '_' + str(self.args.icp_method).split('.')[1]
         filename += '_start' + str(self.args.start_frame) + '_max' + str(self.args.max_num) +\
                     '_skip' + str(self.args.skip)
-        if self.mask_dir != OBJECT_MASK_VISIBLE_DIR:
-            filename += '_segHO3D'
+        #if self.mask_dir != OBJECT_MASK_VISIBLE_DIR:
+        #    filename += '_segHO3D'
         if self.hand_obj_rendering_scores is not None:
             filename += '_renFilter'
-        if self.args.apply_inpainting:
-            filename += '_inPaint'
-        if int(frame_id) > 0:
-            filename += '_frame' + str(frame_id)
-        filename += '.xyz'
 
         if self.args.viewpoint_file != '':
             filename = os.path.join(self.base_dir, self.data_split,
-                                    self.args.scene + '_' + str(self.args.viewpoint_file).split('.')[0] + '.xyz')
+                                    self.args.scene + '_' + str(self.args.viewpoint_file).split('.')[0])
+
+        if self.args.apply_inpainting:
+            filename += '_inPaint'
+        if self.args.inpaint_with_rendering:
+            filename += 'Rend'
+
+        #if int(frame_id) > 0:
+        #    filename += '_frame' + str(frame_id)
+
+        filename += '.xyz'
 
         if down_pcd is not None:
             #print('Saving to: {}'.format(filename))
@@ -1002,9 +1087,9 @@ if __name__ == '__main__':
     args.mask_dir = '/home/tpatten/Data/Hands/HO3D_V2/HO3D_v2_segmentations_rendered/'
     args.hand_obj_rendering_scores = '/home/tpatten/Data/bop/ho3d/hand_obj_ren_scores.json'
     args.viewpoint_file = 'views_Uniform_Segmentation_step0-3.json'
-    args.pose_annotation_file = 'pose_hand_annotation.json'
-    args.visualize = True
-    args.save = False
+    args.pose_annotation_file = ''  # 'pose_hand_annotation.json'
+    args.visualize = False
+    args.save = True
     args.save_intermediate = False
     args.icp_method = ICPMethod.Point2Plane
     # Point2Point=1, Point2Plane=2
@@ -1019,7 +1104,6 @@ if __name__ == '__main__':
     args.raduis_rm_min_nb_points = 250  # Don't change
     args.raduis_rm_radius_factor = 10  # Don't change
     args.voxel_size = 0.001
-    # args.sdf_voxel_length = 2.0 / 512.0
     args.sdf_voxel_length = 0.001
     args.sdf_trunc = 0.02
     args.sdf_depth_trunc = 1.2
@@ -1028,6 +1112,7 @@ if __name__ == '__main__':
     args.min_num_pixels = 8000
     # args.min_ratio_valid = 0.10
     args.apply_inpainting = False
+    args.inpaint_with_rendering = False
 
     # Create the reconstruction
     reconstructor = ModelReconstructor(args)

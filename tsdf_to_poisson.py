@@ -6,7 +6,6 @@ from utils.grasp_utils import *
 import open3d as o3d
 import copy
 from enum import IntEnum
-import trimesh
 from scipy.spatial.distance import directed_hausdorff
 
 
@@ -42,28 +41,14 @@ class PoissonSurfaceReconstructor:
 
         # Second pass applies filter and final Poisson surface reconstruction
         mesh = self.remove_noise(mesh)
-        o3d.visualization.draw_geometries([mesh])
+        # o3d.visualization.draw_geometries([mesh])
         #  if self.args.model_file[0] == '_':
         # mesh = self.taubin_filer(mesh)
-
-        '''
-        tmesh = trimesh.Trimesh(vertices=np.asarray(mesh.vertices),
-                                faces=np.asarray(mesh.triangles),
-                                face_normals=np.asarray(mesh.triangle_normals))
-        #trimesh.repair.fill_holes(tmesh)
-        #trimesh.repair.fix_inversion(tmesh, multibody=True)
-        #trimesh.repair.fix_normals(tmesh, multibody=True)
-        #trimesh.repair.fix_winding(tmesh)
-        temp_file = '/home/tpatten/Data/temp.ply'
-        tmesh.export(temp_file)
-        mesh = o3d.io.read_triangle_mesh(temp_file)
-        o3d.visualization.draw_geometries([mesh])
-        '''
 
         if self.args.r_method == ReconstructionMethod.POISSON or self.args.r_method == ReconstructionMethod.BALL_PIVOT:
             mesh = self.reconstruction(mesh, remove_outliers=self.args.clean_up_outlier_removal,
                                        r_method=self.args.r_method)
-            o3d.visualization.draw_geometries([mesh])
+            # o3d.visualization.draw_geometries([mesh])
 
         # Clean up
         mesh = mesh.remove_degenerate_triangles()
@@ -73,7 +58,7 @@ class PoissonSurfaceReconstructor:
         mesh = mesh.remove_unreferenced_vertices()
 
         # Rotate to correct coordinate system
-        mesh.rotate(np.array([[1., 0., 0.], [0, -1., 0.], [0., 0., -1.]], dtype=np.float32), center=(0, 0, 0))
+        # mesh.rotate(np.array([[1., 0., 0.], [0, -1., 0.], [0., 0., -1.]], dtype=np.float32), center=(0, 0, 0))
 
         # Load the json file containing the mapping of the scene to YCB model
         model_name_data = None
@@ -105,6 +90,9 @@ class PoissonSurfaceReconstructor:
                 save_filename = tsdf_filename.replace('.ply', '_clean.ply')
             print('Saving {}'.format(save_filename))
             o3d.io.write_triangle_mesh(save_filename, mesh)
+            # import trimesh
+            # tmesh = trimesh.load(save_filename)
+            # tmesh.export(save_filename.replace('.ply', '_trimesh.ply'))
 
         # Visualize
         if self.args.visualize:
@@ -211,12 +199,12 @@ if __name__ == '__main__':
     args.ycb_model_path = '/home/tpatten/Data/Hands/HO3D_V2/HO3D_v2/models'
     args.bop_model_path = '/home/tpatten/Data/bop/ycbv/models_eval'
     args.ho3d_to_ycb_map_path = '/home/tpatten/Data/Hands/HO3D/ho3d_to_ycb.json'
-    args.visualize = True
-    args.save = False
+    args.visualize = False
+    args.save = True
     args.outlier_rm_nb_neighbors = 50  # Higher is more aggressive
     args.outlier_rm_std_ratio = 0.01  # Smaller is more aggressive
     args.clean_up_outlier_removal = True
-    args.bop_format = True
+    args.bop_format = False
     # [1] ReconstructionMethod.POISSON, [2] ReconstructionMethod.BALL_PIVOT, [3] ReconstructionMethod.NONE
-    args.r_method = ReconstructionMethod.POISSON
+    args.r_method = ReconstructionMethod.NONE
     psr = PoissonSurfaceReconstructor(args)

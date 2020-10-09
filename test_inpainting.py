@@ -243,7 +243,7 @@ def get_depth_voxel(voxel, pose, cam_intrinsics, im_size):
     return np.array(depth)
 
 
-def render_depth(obj_id, pose, cam_intrinsics):
+def render_depth(ren, obj_id, pose, cam_intrinsics):
     fx, fy, cx, cy = cam_intrinsics[0, 0], cam_intrinsics[1, 1], cam_intrinsics[0, 2], cam_intrinsics[1, 2]
     rendering = ren.render_object(obj_id, pose[:3, :3], pose[:3, 3], fx, fy, cx, cy)
     depth = rendering['depth']
@@ -349,6 +349,7 @@ if __name__ == '__main__':
     args.scene = 'ABF10'
     args.model_render = False
 
+    ren = None
     if args.model_render:
         width = 640
         height = 480
@@ -371,7 +372,7 @@ if __name__ == '__main__':
         obj_id, object_mesh, object_pose, camK = load_object_and_pose(args.ho3d_path, args.scene, frame_id)
 
         if args.model_render:
-            rendered_depth = render_depth(obj_id, object_pose, camK)
+            rendered_depth = render_depth(ren, obj_id, object_pose, camK)
             # rendered_depth = get_depth_voxel(object_mesh, object_pose, camK, depth.shape)
 
         # Mask the image
