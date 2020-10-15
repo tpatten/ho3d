@@ -9,12 +9,12 @@ import copy
 import transforms3d as tf3d
 from enum import IntEnum
 import json
+from scipy.spatial.transform.rotation import Rotation
 
 
 OBJECT_MASK_VISIBLE_DIR = 'object_vis'
 COORD_CHANGE_MAT = np.array([[1., 0., 0.], [0, -1., 0.], [0., 0., -1.]], dtype=np.float32)
 ICP_THRESH = 0.02
-RANSAC_THRESH = 0.015
 YCB_MODELS_DIR = '/home/tpatten/Data/Hands/HO3D_V2/HO3D_v2/'
 
 
@@ -41,14 +41,13 @@ class ModelReconstructor:
         self.scene_pcd = None
         self.prev_cloud = None
         self.prev_pose = np.eye(4)
-        if args.mask_erosion_kernel > 0:
-            self.erosion_kernel = np.ones((args.mask_erosion_kernel, args.mask_erosion_kernel), np.uint8)
-        else:
-            self.erosion_kernel = None
+        self.erosion_kernel = {'obj': None, 'hand': None}
+        if args.mask_erosion_kernel[0] > 0:
+            self.erosion_kernel['obj'] = np.ones((args.mask_erosion_kernel[0], args.mask_erosion_kernel[0]), np.uint8)
+        if args.mask_erosion_kernel[1] > 0:
+            self.erosion_kernel['hand'] = np.ones((args.mask_erosion_kernel[1], args.mask_erosion_kernel[1]), np.uint8)
         self.volume = None
-
-        # TODO: Come back to testing poses from Kiru's annotation tool
-        # self.test_func()
+        self.pose_annotation_global_rot = np.eye(3)
 
         # Load the rendering scores file
         if os.path.isfile(self.args.hand_obj_rendering_scores):
@@ -125,6 +124,10 @@ class ModelReconstructor:
                         filename = os.path.join(self.base_dir, self.data_split,
                                                 self.args.scene + '_' + str(self.args.viewpoint_file).split('.')[0])
 
+                    if self.args.pose_annotation_file != '':
+                        filename = os.path.join(self.base_dir, self.data_split,
+                                                self.args.scene + '_AnnoPoses')
+
                     if self.args.apply_inpainting:
                         filename += '_inPaint'
                     if self.args.inpaint_with_rendering:
@@ -145,98 +148,6 @@ class ModelReconstructor:
 
                 #print('Saving to: {}'.format(filename.replace('.xyz', '.ply')))
                 #o3d.io.write_point_cloud(filename.replace('.xyz', '.ply'), loaded_pcd)
-
-    def test_func(self):
-        # Load two of the images
-        scene_id = 'ABF10'
-        frame_ids = ['0090', '0514', '1055']
-        poses = [np.eye(4),
-                 np.asarray([0.62578040423448, 0.6975679028668021, -0.34899556811819804, 0.13193419399246284,
-                             -0.5044116046496037, 0.7031957775374543, 0.5010834576677885, -0.15048727462816902,
-                             0.594951946606566, -0.13753079416445993, 0.7919074831604712, 0.17977535288721627,
-                             0.0, 0.0, 0.0, 1.0]).reshape((4, 4)),
-                 np.asarray([-0.14613412359310565, -0.9361789072739534, 0.3197090419381649, -0.05513735799376178,
-                             -0.9823675359963918, 0.099231970655764, -0.15845201235752068, 0.16534490025361823,
-                             0.1166140735162308, -0.3372270297219925, -0.9341729434547074, 0.9158804802458833,
-                             0.0, 0.0, 0.0, 1.0]).reshape((4, 4))]
-
-        use_gt = False
-        do_inv = False
-        do_coord_change = True
-        aligned_clouds = []
-        for i in range(len(frame_ids)):
-            # Read image, depths maps and annotations
-            self.rgb, self.depth, self.anno, _ = self.load_data(scene_id, frame_ids[i])
-            # Read the mask
-            mask, mask_hand = self.load_mask(scene_id, frame_ids[i])
-            # Extract the masked point cloud
-            cloud, colors = self.image_to_world(self.rgb, self.depth, mask, cut_z=2.0)
-
-            # Transform the cloud and get the camera position
-            if use_gt:
-                obj_trans = np.copy(self.anno['objTrans'])
-                if do_coord_change:
-                    obj_trans = obj_trans.dot(COORD_CHANGE_MAT.T)
-                obj_rot = np.copy(self.anno['objRot'])
-                if do_coord_change:
-                    obj_rot = obj_rot.flatten().dot(COORD_CHANGE_MAT.T).reshape(self.anno['objRot'].shape)
-                rot_max = cv2.Rodrigues(obj_rot)[0].T
-                # print(obj_rot)
-                # print(rot_max)
-                # print(cv2.Rodrigues(rot_max)[0])
-
-                cloud_tfd = np.copy(cloud)
-                cloud_tfd -= obj_trans
-                cloud_tfd = np.matmul(cloud_tfd, np.linalg.inv(rot_max))
-            else:
-                t_mat = poses[i]
-                obj_trans = t_mat[:3, 3].reshape((3,))
-                rot_max = t_mat[:3, :3]
-
-                if do_coord_change:
-                    # rotx = np.eye(4)
-                    # from scipy.spatial.transform.rotation import Rotation
-                    # rotx[:3, :3] = Rotation.from_euler('x', 180, degrees=True).as_dcm()
-                    # pose = np.eye(4)
-                    # pose[:3, :3] = rot_max
-                    # pose[:3, 3] = obj_trans
-                    # obj_trans = pose[:3, 3].reshape((3,))
-                    # rot_max = pose[:3, :3]
-
-                    obj_trans = obj_trans.dot(COORD_CHANGE_MAT.T)
-                    obj_rot = cv2.Rodrigues(rot_max)[0]
-                    obj_rot = obj_rot.flatten().dot(COORD_CHANGE_MAT.T).reshape(obj_rot.shape)
-                    rot_max = cv2.Rodrigues(obj_rot)[0].T
-
-                if not do_inv:
-                    cloud_tfd = np.copy(cloud)
-                    cloud_tfd += obj_trans
-                    cloud_tfd = np.matmul(cloud_tfd, rot_max)
-                else:
-                    cloud_tfd = np.copy(cloud)
-                    cloud_tfd -= obj_trans
-                    cloud_tfd = np.matmul(cloud_tfd, np.linalg.inv(rot_max))
-            vis_pcd = o3d.geometry.PointCloud()
-            vis_pcd.points = o3d.utility.Vector3dVector(cloud_tfd)
-            if i == 0:
-                vis_pcd.paint_uniform_color([0.9, 0.1, 0.1])
-            elif i == 1:
-                vis_pcd.paint_uniform_color([0.1, 0.9, 0.1])
-            elif i == 2:
-                vis_pcd.paint_uniform_color([0.1, 0.1, 0.9])
-            else:
-                vis_pcd.colors = o3d.utility.Vector3dVector(colors)
-            aligned_clouds.append(vis_pcd)
-
-        # Visualize
-        vis = o3d.visualization.Visualizer()
-        vis.create_window()
-        for c in aligned_clouds:
-            vis.add_geometry(c)
-        vis.run()
-        vis.destroy_window()
-
-        sys.exit(0)
 
     def reconstruct_object_model(self):
         # If the input scene contains digit identifier, then it is the only subdir
@@ -269,12 +180,18 @@ class ModelReconstructor:
             tsdf_mesh = self.volume.extract_triangle_mesh()
             tsdf_mesh.compute_vertex_normals()
 
+        # If alignment to CAD model is required
+        if self.args.pose_annotation_file != '' and self.args.align_to_cad:
+            tsdf_mesh_aligned = self.align_to_cad(tsdf_mesh)
+        else:
+            tsdf_mesh_aligned = None
+
         # Save
         combined_pcd = None
         if self.args.save:
             base_dir = os.path.join(self.base_dir, self.data_split)
             combined_pcd = self.save_clouds_and_camera_poses(base_dir, processed_frames, cam_poses, est_cam_poses,
-                                                             mask_pcds, tsdf_mesh)
+                                                             mask_pcds, tsdf_mesh, mesh_aligned=tsdf_mesh_aligned)
 
         # Visualize
         if self.args.visualize:
@@ -284,8 +201,12 @@ class ModelReconstructor:
                 self.visualize(cam_poses, mask_pcds, scene_pcds=scene_pcds)
             else:
                 self.visualize(est_cam_poses, mask_pcds, scene_pcds=scene_pcds, gt_poses=cam_poses)
-            print('Visualizing TSDF volume...')
-            self.visualize_volume(tsdf_mesh)
+            if tsdf_mesh_aligned is not None:
+                print('Visualizing TSDF volume - ALIGNED...')
+                self.visualize_volume(tsdf_mesh_aligned)
+            else:
+                print('Visualizing TSDF volume...')
+                self.visualize_volume(tsdf_mesh)
 
         if combined_pcd is None:
             return self.combine_clouds(mask_pcds)
@@ -325,6 +246,10 @@ class ModelReconstructor:
                     relative_poses = json.load(json_file)
                 frame_ids = relative_poses.keys()
                 frame_ids = sorted([f.zfill(4) + '.png' for f in frame_ids])
+            # Get the global transformation
+            if self.args.align_to_cad:
+                _, _, anno, _ = self.load_data(scene_id, frame_ids[0].split('.')[0])
+                self.pose_annotation_global_rot = cv2.Rodrigues(anno['objRot'])[0].T
 
         # Load the camera parameters
         cam_params = self.read_camera_intrinsics(scene_id)
@@ -394,39 +319,38 @@ class ModelReconstructor:
                 counter += self.args.skip
                 continue
 
-            masked_rgb = self.apply_mask(self.rgb, mask)
-            masked_depth = self.apply_mask(self.depth, mask)
+            masked_rgb = self.apply_mask(self.rgb, mask, mask_hand)
+            masked_depth = self.apply_mask(self.depth, mask, mask_hand)
 
             # Inpaint the depth image
             if self.args.apply_inpainting:
                 if self.args.inpaint_with_rendering:
                     # Render the depth from the model
-                    rendered_depth = self.render_depth(cam_params)
+                    rendered_depth = self.render_depth(cam_params, pose_in_frames=relative_poses,
+                                                       frame_id=str(int(frame_id)))
                     # Fill the missing values with rendered depth values
-                    masked_depth = self.fill_from_rendering(masked_depth, rendered_depth)
-                    self.depth = masked_depth
+                    filled_depth = self.fill_from_rendering(self.depth, masked_depth, rendered_depth)
+
+                    # Visualize
+                    if self.args.visualize_inpainting:
+                        img_output = np.vstack((np.hstack((self.depth, masked_depth)),
+                                                np.hstack((rendered_depth, filled_depth))))
+                        cv2.imshow('Depth image', img_output)
+                        cv2.waitKey(0)
+                        cv2.destroyAllWindows()
+
+                    # Set the depth and remove the mask
+                    self.depth = filled_depth
+                    masked_depth = filled_depth
                     mask = None
                 else:
                     inpainted_depth = self.get_inpainted_depth(masked_depth, mask, mask_hand)
                     masked_depth = inpainted_depth
-                # if self.args.inpaint_with_rendering:
-                #    right_img = rendered_depth
-                # else:
-                #    right_img = cv2.cvtColor(self.rgb, cv2.COLOR_RGB2GRAY)
-                # img_output = np.vstack((np.hstack((self.depth, right_img)),
-                #                        np.hstack((masked_depth, inpainted_depth))))
-                # cv2.imshow('Depth image', img_output)
-                # cv2.waitKey(0)
-                # cv2.destroyAllWindows()
-
-                #masked_depth = inpainted_depth
-                #masked_depth = rendered_depth
-                #self.depth = rendered_depth
-                #mask = None
 
             # Extract the masked point cloud
             cloud, colors = self.image_to_world(self.rgb, self.depth, mask,
                                                 cut_z=np.linalg.norm(self.anno['objTrans']) * 1.1)
+
             if cloud.shape[0] == 0:
                 print('Empty cloud for frame {}'.format(frame_id))
                 counter += self.args.skip
@@ -565,23 +489,33 @@ class ModelReconstructor:
             hand = cv2.resize(hand, (self.rgb.shape[1], self.rgb.shape[0]), interpolation=cv2.INTER_NEAREST)
 
         # Apply erosion
-        if self.erosion_kernel is not None:
-            mask = cv2.erode(mask, self.erosion_kernel, iterations=1)
-            hand = cv2.erode(hand, self.erosion_kernel, iterations=1)
+        if self.erosion_kernel['obj'] is not None:
+            mask = cv2.erode(mask, self.erosion_kernel['obj'], iterations=1)
+        if self.erosion_kernel['hand'] is not None:
+            # hand = cv2.erode(hand, self.erosion_kernel['hand'], iterations=1)
+            hand = cv2.dilate(hand, self.erosion_kernel['hand'], iterations=1)
 
         return mask, hand
 
-    def render_depth(self, cam_intrinsics):
-        pose = np.eye(4)
-        pose[:3, :3] = cv2.Rodrigues(self.anno['objRot'])[0]
-        pose[:3, 3] = self.anno['objTrans']
+    def render_depth(self, cam_intrinsics, pose_in_frames=None, frame_id=None):
+        # Get the ground truth transformation
+        do_inverse = False
+        if pose_in_frames is None or frame_id not in pose_in_frames:
+            pose = np.eye(4)
+            pose[:3, :3] = cv2.Rodrigues(self.anno['objRot'])[0]
+            pose[:3, 3] = self.anno['objTrans']
+        else:
+            pose = np.asarray(pose_in_frames[frame_id]).reshape((4, 4))
+            do_inverse = True
 
         # From OpenGL coordinates
-        from scipy.spatial.transform.rotation import Rotation
         rotx = np.eye(4)
         rotx[:3, :3] = Rotation.from_euler('x', 180, degrees=True).as_dcm()
         # pose = rotx @ pose
         pose = np.matmul(rotx, pose)
+
+        if do_inverse:
+            pose = np.linalg.inv(pose)
 
         # fx, fy, cx, cy = cam_intrinsics[0, 0], cam_intrinsics[1, 1], cam_intrinsics[0, 2], cam_intrinsics[1, 2]
         fx, fy = cam_intrinsics.get_focal_length()
@@ -625,18 +559,22 @@ class ModelReconstructor:
         return cam_params
 
     @staticmethod
-    def fill_from_rendering(depth, rendered_depth):
-        filled_depth = np.copy(depth).flatten()
-        rendered_depth = rendered_depth.flatten()
-        for i in range(len(rendered_depth)):
-            if filled_depth[i] == 0 and rendered_depth[i] > 0:
-                filled_depth[i] = rendered_depth[i]
+    def fill_from_rendering(depth, depth_masked, depth_rendered):
+        depth = depth.flatten()
+        depth_rendered = depth_rendered.flatten()
+        depth_filled = np.copy(depth_masked).flatten()
+        # print('Mean: {}'.format(np.mean(depth_masked)))
+        for i in range(len(depth_rendered)):
+            if depth_filled[i] == 0 and depth_rendered[i] > 0 and \
+               np.abs(depth_rendered[i] - depth[i]) < 0.1:# and depth[i] < 0.5:
+                depth_filled[i] = depth_rendered[i]
 
         # Reshape back to input shape
-        filled_depth = filled_depth.reshape(depth.shape)
-        rendered_depth = rendered_depth.reshape(rendered_depth.shape)
+        depth = depth_rendered.reshape(depth.shape)
+        depth_rendered = depth_rendered.reshape(depth_rendered.shape)
+        depth_filled = depth_filled.reshape(depth_masked.shape)
 
-        return filled_depth
+        return depth_filled
 
     def image_to_world(self, rgb, depth, mask=None, cut_z=1000.):
         i_fx = 1. / self.anno['camMat'][0, 0]
@@ -661,14 +599,20 @@ class ModelReconstructor:
 
         return pts, colors
 
-    def apply_mask(self, image, mask):
+    @staticmethod
+    def apply_mask(image, mask_obj, mask_hand):
         # Get the indices that are not in the mask
-        valid_idx = np.where(mask.flatten() == 0)[0]
+        valid_idx = np.where(mask_obj.flatten() == 0)[0]
 
         # Set the invalid indices to 0
         masked_image = np.copy(image).flatten()
         for v in valid_idx:
             masked_image[v] = 0  # [0, 0, 0]
+
+        # Remove any pixels belonging to the hand
+        valid_idx = np.where(mask_hand.flatten() != 0)[0]
+        for v in valid_idx:
+            masked_image[v] = 0
 
         # Reshape back to input shape
         masked_image = masked_image.reshape(image.shape)
@@ -785,6 +729,7 @@ class ModelReconstructor:
     def transform_to_object_frame(self, cloud, pose_in_frames=None, frame_id=None):
         # Get the ground truth transformation
         if pose_in_frames is None or frame_id not in pose_in_frames:
+            print('...HO-3D pose')
             # print('Object pose not provided for frame {}'.format(frame_id))
             obj_trans = np.copy(self.anno['objTrans'])
             # print('obj_trans.shape {}'.format(obj_trans.shape))
@@ -806,34 +751,28 @@ class ModelReconstructor:
             cam_pose[:3, 3] = np.matmul(-obj_trans, np.linalg.inv(rot_max))
 
         else:
-            t_mat = np.asarray(pose_in_frames[frame_id]).reshape((4, 4))
-            obj_trans = t_mat[:3, 3].reshape((3,))
-            rot_max = t_mat[:3, :3]
-
+            print('...annotated pose')
+            '''
+            pose = poses[i]
             rotx = np.eye(4)
-            from scipy.spatial.transform.rotation import Rotation
             rotx[:3, :3] = Rotation.from_euler('x', 180, degrees=True).as_dcm()
-            pose = np.eye(4)
-            pose[:3, :3] = rot_max
-            pose[:3, 3] = obj_trans
-            obj_trans = pose[:3, 3].reshape((3,))
-            rot_max = pose[:3, :3]
+            pose = np.matmul(rotx, pose)
 
-            do_inv = True
-            if not do_inv:
-                cloud_tfd = np.copy(cloud)
-                cloud_tfd += obj_trans
-                cloud_tfd = np.matmul(cloud_tfd, rot_max)
-                cam_pose = np.eye(4)
-                cam_pose[:3, :3] = rot_max
-                cam_pose[:3, 3] = np.matmul(obj_trans, rot_max)
-            else:
-                cloud_tfd = np.copy(cloud)
-                cloud_tfd -= obj_trans
-                cloud_tfd = np.matmul(cloud_tfd, np.linalg.inv(rot_max))
-                cam_pose = np.eye(4)
-                cam_pose[:3, :3] = rot_max
-                cam_pose[:3, 3] = np.matmul(-obj_trans, np.linalg.inv(rot_max))
+            vis_pcd = o3d.geometry.PointCloud()
+            vis_pcd.points = o3d.utility.Vector3dVector(cloud)
+            vis_pcd.transform(pose)
+            '''
+
+            t_mat = np.asarray(pose_in_frames[frame_id]).reshape((4, 4))
+            rotx = np.eye(4)
+            rotx[:3, :3] = Rotation.from_euler('x', 180, degrees=True).as_dcm()
+            t_mat = np.matmul(rotx, t_mat)
+            pc = o3d.geometry.PointCloud()
+            pc.points = o3d.utility.Vector3dVector(cloud)
+            pc.transform(t_mat)
+
+            cloud_tfd = np.asarray(pc.points)
+            cam_pose = t_mat
 
         if self.args.reg_method == RegMethod.GT or self.prev_cloud is None:
             return cloud_tfd, cam_pose, cloud_tfd, cam_pose
@@ -892,6 +831,49 @@ class ModelReconstructor:
 
         return reg_p2p.transformation
 
+    def align_to_cad(self, mesh_tsdf):
+        # Load the CAD model to align the mesh to
+        ho3d_to_ycb_map_path = '/home/tpatten/Data/Hands/HO3D/ho3d_to_ycb.json'
+        with open(os.path.join(ho3d_to_ycb_map_path)) as f:
+            model_name_data = json.load(f)
+        scene_key = ''.join([i for i in self.args.scene if not i.isdigit()])
+        ycb_model_filename = os.path.join(
+            YCB_MODELS_DIR, 'models', model_name_data[scene_key]['ycbv'], 'mesh.ply')
+        target = o3d.io.read_point_cloud(ycb_model_filename)
+
+        # Create a point cloud from the mesh and initially align it to the global frame
+        source = o3d.geometry.PointCloud()
+        points = copy.deepcopy(np.asarray(mesh_tsdf.vertices))
+        points = np.matmul(points, np.linalg.inv(self.pose_annotation_global_rot))
+        centroid = np.mean(points, axis=0)
+        points -= centroid
+        source.points = o3d.utility.Vector3dVector(points)
+
+        # Run ICP to align the mesh to the model
+        threshold = 0.02
+        o3d.geometry.estimate_normals(source, o3d.geometry.KDTreeSearchParamHybrid(radius=0.1, max_nn=30))
+        o3d.geometry.estimate_normals(target, o3d.geometry.KDTreeSearchParamHybrid(radius=0.1, max_nn=30))
+        reg_p2l = o3d.registration.registration_icp(
+            source, target, threshold, np.eye(4),
+            o3d.registration.TransformationEstimationPointToPlane())
+        source.transform(reg_p2l.transformation)
+
+        # Transform the mesh
+        mesh_aligned = copy.deepcopy(mesh_tsdf)
+        mesh_aligned.vertices = source.points
+
+        triangle_normals = np.asarray(mesh_tsdf.triangle_normals)
+        triangle_normals = np.matmul(triangle_normals, np.linalg.inv(self.pose_annotation_global_rot))
+        triangle_normals = np.matmul(triangle_normals, reg_p2l.transformation[:3, :3])
+        mesh_aligned.triangle_normals = o3d.utility.Vector3dVector(triangle_normals)
+
+        vertex_normals = np.asarray(mesh_tsdf.vertex_normals)
+        vertex_normals = np.matmul(vertex_normals, np.linalg.inv(self.pose_annotation_global_rot))
+        vertex_normals = np.matmul(vertex_normals, reg_p2l.transformation[:3, :3])
+        mesh_aligned.vertex_normals = o3d.utility.Vector3dVector(vertex_normals)
+
+        return mesh_aligned
+
     @staticmethod
     def visualize(cam_poses=None, mask_pcds=None, scene_pcds=None, gt_poses=None):
         # Create visualizer
@@ -948,7 +930,8 @@ class ModelReconstructor:
         if mesh is not None:
             o3d.visualization.draw_geometries([mesh])
 
-    def save_clouds_and_camera_poses(self, base_dir, frame_ids, cam_poses, est_cam_poses, mask_pcds, mesh, frame_id=0):
+    def save_clouds_and_camera_poses(self, base_dir, frame_ids, cam_poses, est_cam_poses, mask_pcds, mesh,
+                                     mesh_aligned=None, frame_id=0):
         down_pcd = None
 
         # Combine and downsample the clouds
@@ -974,6 +957,10 @@ class ModelReconstructor:
             filename = os.path.join(self.base_dir, self.data_split,
                                     self.args.scene + '_' + str(self.args.viewpoint_file).split('.')[0])
 
+        if self.args.pose_annotation_file != '':
+            filename = os.path.join(self.base_dir, self.data_split,
+                                    self.args.scene + '_AnnoPoses')
+
         if self.args.apply_inpainting:
             filename += '_inPaint'
         if self.args.inpaint_with_rendering:
@@ -996,7 +983,7 @@ class ModelReconstructor:
             print('Saving to: {}'.format(filename.replace('.xyz', '.ply')))
             o3d.io.write_point_cloud(filename.replace('.xyz', '.ply'), down_pcd)
 
-        # Write the mesh as .ply
+        # Save the mesh as .ply
         filename = filename.replace('.xyz', '')
         if self.args.viewpoint_file == '':
             filename += '_visRatio' + str(self.args.min_ratio_valid).replace('.', '-')
@@ -1004,14 +991,11 @@ class ModelReconstructor:
         print('Saving to: {}'.format(filename))
         o3d.io.write_triangle_mesh(filename, mesh)
 
-        '''
-        # Create visualizer
-        vis = o3d.visualization.Visualizer()
-        vis.create_window()
-        vis.add_geometry(down_pcd)
-        vis.run()
-        vis.destroy_window()
-        '''
+        # Save the aligned mesh
+        if mesh_aligned is not None:
+            filename = filename.replace('.ply', '_aligned.ply')
+            print('Saving to: {}'.format(filename))
+            o3d.io.write_triangle_mesh(filename, mesh_aligned)
 
         return down_pcd
 
@@ -1087,7 +1071,8 @@ if __name__ == '__main__':
     args.mask_dir = '/home/tpatten/Data/Hands/HO3D_V2/HO3D_v2_segmentations_rendered/'
     args.hand_obj_rendering_scores = '/home/tpatten/Data/bop/ho3d/hand_obj_ren_scores.json'
     args.viewpoint_file = 'views_Uniform_Segmentation_step0-3.json'
-    args.pose_annotation_file = ''  # 'pose_hand_annotation.json'
+    args.pose_annotation_file = 'pose_hand_annotation.json'
+    args.align_to_cad = True
     args.visualize = False
     args.save = True
     args.save_intermediate = False
@@ -1098,7 +1083,7 @@ if __name__ == '__main__':
     args.start_frame = 0
     args.max_num = -1
     args.skip = 1
-    args.mask_erosion_kernel = 5
+    args.mask_erosion_kernel = [5, 8]
     args.outlier_rm_nb_neighbors = 2500  # Higher is more aggressive
     args.outlier_rm_std_ratio = 0.000001  # Smaller is more aggressive
     args.raduis_rm_min_nb_points = 250  # Don't change
@@ -1113,6 +1098,7 @@ if __name__ == '__main__':
     # args.min_ratio_valid = 0.10
     args.apply_inpainting = False
     args.inpaint_with_rendering = False
+    args.visualize_inpainting = False
 
     # Create the reconstruction
     reconstructor = ModelReconstructor(args)

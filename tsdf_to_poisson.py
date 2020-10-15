@@ -58,7 +58,8 @@ class PoissonSurfaceReconstructor:
         mesh = mesh.remove_unreferenced_vertices()
 
         # Rotate to correct coordinate system
-        # mesh.rotate(np.array([[1., 0., 0.], [0, -1., 0.], [0., 0., -1.]], dtype=np.float32), center=(0, 0, 0))
+        if self.args.flip_from_openGL:
+            mesh.rotate(np.array([[1., 0., 0.], [0, -1., 0.], [0., 0., -1.]], dtype=np.float32), center=(0, 0, 0))
 
         # Load the json file containing the mapping of the scene to YCB model
         model_name_data = None
@@ -104,8 +105,11 @@ class PoissonSurfaceReconstructor:
                 ycb_model_filename = os.path.join(
                     self.args.ycb_model_path, model_name_data[scene_key]['ycbv'], 'textured_simple.obj')
             mesh_ycb = o3d.io.read_triangle_mesh(ycb_model_filename)
-            print('Hausdorff: {}'.format(directed_hausdorff(np.asarray(mesh.vertices),
-                                                            np.asarray(mesh_ycb.vertices))[0]))
+            hd_mesh_to_model = directed_hausdorff(np.asarray(mesh.vertices), np.asarray(mesh_ycb.vertices))[0]
+            hd_model_to_mesh = directed_hausdorff(np.asarray(mesh_ycb.vertices), np.asarray(mesh.vertices))[0]
+            print('Hausdorff (mesh to model): {}'.format(hd_mesh_to_model))
+            print('Hausdorff (model to mesh): {}'.format(hd_model_to_mesh))
+            print('Hausdorff (max):           {}'.format(max(hd_mesh_to_model, hd_model_to_mesh)))
             o3d.visualization.draw_geometries([mesh, mesh_ycb])
             # o3d.visualization.draw_geometries([mesh])
 
@@ -179,13 +183,6 @@ class PoissonSurfaceReconstructor:
 
 
 if __name__ == '__main__':
-    # mesh_filename = '/home/tpatten/Data/in-hand_object_scanning_ICRA2019/ycb_meshes/banana.ply'
-    # mesh_in = o3d.io.read_triangle_mesh(mesh_filename)
-    # mesh_in.scale(1000, center=(0, 0, 0))
-    # save_filename = mesh_filename.replace('.ply', '_scaled.ply')
-    # o3d.io.write_triangle_mesh(save_filename, mesh_in)
-    # sys.exit(0)
-
     # Parse the arguments
     parser = argparse.ArgumentParser(description='HO-3D Clean up TSDF reconstruction with Poisson reconstruction')
     parser.add_argument("model_file", type=str, help="The TSDF model file to be cleaned up")
@@ -204,7 +201,8 @@ if __name__ == '__main__':
     args.outlier_rm_nb_neighbors = 50  # Higher is more aggressive
     args.outlier_rm_std_ratio = 0.01  # Smaller is more aggressive
     args.clean_up_outlier_removal = True
-    args.bop_format = False
+    args.bop_format = True
+    args.flip_from_openGL = False
     # [1] ReconstructionMethod.POISSON, [2] ReconstructionMethod.BALL_PIVOT, [3] ReconstructionMethod.NONE
     args.r_method = ReconstructionMethod.NONE
     psr = PoissonSurfaceReconstructor(args)
