@@ -329,7 +329,7 @@ class ModelReconstructor:
                     rendered_depth = self.render_depth(cam_params, pose_in_frames=relative_poses,
                                                        frame_id=str(int(frame_id)))
                     # Fill the missing values with rendered depth values
-                    filled_depth = self.fill_from_rendering(self.depth, masked_depth, rendered_depth)
+                    filled_depth = self.fill_from_rendering(self.depth, masked_depth, rendered_depth, mask_hand)
 
                     # Visualize
                     if self.args.visualize_inpainting:
@@ -559,19 +559,29 @@ class ModelReconstructor:
         return cam_params
 
     @staticmethod
-    def fill_from_rendering(depth, depth_masked, depth_rendered):
+    def fill_from_rendering(depth, depth_masked, depth_rendered, mask_hand):
         depth = depth.flatten()
         depth_rendered = depth_rendered.flatten()
+        mask_hand = mask_hand.flatten()
         depth_filled = np.copy(depth_masked).flatten()
-        # print('Mean: {}'.format(np.mean(depth_masked)))
         for i in range(len(depth_rendered)):
-            if depth_filled[i] == 0 and depth_rendered[i] > 0 and \
-               np.abs(depth_rendered[i] - depth[i]) < 0.1:# and depth[i] < 0.5:
-                depth_filled[i] = depth_rendered[i]
+            #if depth_filled[i] == 0 and depth_rendered[i] > 0 and \
+            #   np.abs(depth_rendered[i] - depth[i]) < 0.1:# and depth[i] < 0.5:
+            #    depth_filled[i] = depth_rendered[i]
+            if depth_filled[i] == 0 and depth_rendered[i] > 0:
+                # Only fill in the depth if this is not a hand pixel or if not background
+                if mask_hand[i] == 0 and depth[i] < 0.5:
+                    ## Invalid pixel due to sensor (depth[i] == 0) -> fill with rendered depth
+                    #if depth[i] == 0:
+                    #    depth_filled[i] = depth_rendered[i]
+                    # Invalid because of misaligned mask (depth[i] ~= depth_rendered[i]) -> fill with original depth
+                    if depth[i] > depth_rendered[i] and np.abs(depth_rendered[i] - depth[i]) < 0.1:
+                        depth_filled[i] = depth[i]
 
         # Reshape back to input shape
-        depth = depth_rendered.reshape(depth.shape)
-        depth_rendered = depth_rendered.reshape(depth_rendered.shape)
+        depth = depth_rendered.reshape(depth_masked.shape)
+        depth_rendered = depth_rendered.reshape(depth_masked.shape)
+        mask_hand = mask_hand.reshape(depth_masked.shape)
         depth_filled = depth_filled.reshape(depth_masked.shape)
 
         return depth_filled
@@ -1083,7 +1093,7 @@ if __name__ == '__main__':
     args.start_frame = 0
     args.max_num = -1
     args.skip = 1
-    args.mask_erosion_kernel = [5, 8]
+    args.mask_erosion_kernel = [5, 5]
     args.outlier_rm_nb_neighbors = 2500  # Higher is more aggressive
     args.outlier_rm_std_ratio = 0.000001  # Smaller is more aggressive
     args.raduis_rm_min_nb_points = 250  # Don't change
@@ -1096,8 +1106,8 @@ if __name__ == '__main__':
     args.construct_tsdf = True
     args.min_num_pixels = 8000
     # args.min_ratio_valid = 0.10
-    args.apply_inpainting = False
-    args.inpaint_with_rendering = False
+    args.apply_inpainting = True
+    args.inpaint_with_rendering = True
     args.visualize_inpainting = False
 
     # Create the reconstruction
