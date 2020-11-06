@@ -1106,8 +1106,8 @@ if __name__ == '__main__':
     args.construct_tsdf = True
     args.min_num_pixels = 8000
     # args.min_ratio_valid = 0.10
-    args.apply_inpainting = True
-    args.inpaint_with_rendering = True
+    args.apply_inpainting = False
+    args.inpaint_with_rendering = False
     args.visualize_inpainting = False
 
     # Create the reconstruction
