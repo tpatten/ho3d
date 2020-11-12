@@ -4,7 +4,6 @@ import open3d as o3d
 import cv2
 import imageio
 import pcl
-import random
 
 
 class ObjectSegmenter:
@@ -19,7 +18,7 @@ class ObjectSegmenter:
         dirs = [o for o in os.listdir(root_dir) if os.path.isdir("{}/{}".format(root_dir, o))]
         dirs.sort()
 
-        for seq in dirs:
+        for seq in dirs[2:]:
             # Directory where the date for this sequence is
             seq_dir = os.path.join(root_dir, seq)
             print('Processing {}'.format(seq_dir))
@@ -62,6 +61,8 @@ class ObjectSegmenter:
         scene_pcd = o3d.geometry.PointCloud()
         scene_pcd.points = o3d.utility.Vector3dVector(points)
         scene_pcd.paint_uniform_color([0.5, 0.5, 0.5])
+        #if self.args.visualize:
+        #    o3d.visualization.draw_geometries([scene_pcd])
 
         # Mask
         erosion_kernel = np.ones((8, 8), np.uint8)
@@ -72,7 +73,7 @@ class ObjectSegmenter:
         return depth, rgb, scene_pcd, img_coords, hand_mask
 
     @staticmethod
-    def image_to_world(depth, anno, z_cutoff=0.5):
+    def image_to_world(depth, anno, z_cutoff=1.0):
         i_fx = 1. / anno['camMat'][0, 0]
         i_fy = 1. / anno['camMat'][1, 1]
         cx = anno['camMat'][0, 2]
@@ -98,21 +99,22 @@ class ObjectSegmenter:
 
     def segment_frame(self, cloud, hand_mask):
         # Color the hand points
-        colors = np.asarray(cloud.colors)
+        #colors = np.asarray(cloud.colors)
         hand_indices = set(np.where((hand_mask > 0).flatten())[0])
-        for h in hand_indices:
-            colors[h] = [236.0/255, 188.0/255, 180.0/255]
+        #for h in hand_indices:
+        #    colors[h] = [236.0/255, 188.0/255, 180.0/255]
 
         # Create kd tree with the hand coordinates
         points = np.asarray(cloud.points).astype(np.float32)
-        hand_pts = np.zeros((len(hand_indices), 3))
-        counter = 0
-        for h in hand_indices:
-            hand_pts[counter] = points[h]
-            counter += 1
-        hand_pcd = o3d.geometry.PointCloud()
-        hand_pcd.points = o3d.utility.Vector3dVector(hand_pts)
-        hand_kd_tree = o3d.geometry.KDTreeFlann(hand_pcd)
+        if len(hand_indices) > 0:
+            hand_pts = np.zeros((len(hand_indices), 3))
+            counter = 0
+            for h in hand_indices:
+                hand_pts[counter] = points[h]
+                counter += 1
+            hand_pcd = o3d.geometry.PointCloud()
+            hand_pcd.points = o3d.utility.Vector3dVector(hand_pts)
+            hand_kd_tree = o3d.geometry.KDTreeFlann(hand_pcd)
 
         # Remove all background and hand points
         points_new = []
@@ -131,33 +133,45 @@ class ObjectSegmenter:
         cloud_pcl.from_array(points_new)
         tree = cloud_pcl.make_kdtree()
         ec = cloud_pcl.make_EuclideanClusterExtraction()
-        ec.set_ClusterTolerance(0.02)
+        ec.set_ClusterTolerance(0.002)
         ec.set_MinClusterSize(100)
         ec.set_MaxClusterSize(2500000)
         ec.set_SearchMethod(tree)
         cluster_indices = ec.Extract()
+
+        '''
+        import random
+        for clust in cluster_indices:
+            rgb = [random.uniform(0, 1), random.uniform(0, 1), random.uniform(0, 1)]
+            for c in clust:
+                colors[points_to_cloud_map[c]] = rgb
+        cloud.colors = o3d.utility.Vector3dVector(colors)
+        o3d.visualization.draw_geometries([cloud])
+        '''
 
         # Retain all clusters with more than 500 points
         cluster_indices_flat = []
         for clust in cluster_indices:
             if len(clust) > 500:
                 c_indices = [points_to_cloud_map[c] for c in clust]
-                d = self.dist_to_nearest_point(points, hand_kd_tree, c_indices)
+                if len(hand_indices) > 0:
+                    d = self.dist_to_nearest_point(points, hand_kd_tree, c_indices)
+                else:
+                    d = 0
                 if d < 0.005:
                     cluster_indices_flat.extend(c_indices)
-                else:
-                    print(d)
+                #else:
+                #    print(d)
 
         '''
         cluster_indices_flat = []
         for clust in cluster_indices:
-            if len(clust) > 500:
-                cluster_indices_flat.extend([c for c in clust])
+            cluster_indices_flat.extend([c for c in clust])
         cluster_indices = cluster_indices_flat
         colors = np.asarray(cloud.colors)
         rgb = [0.1, 0.8, 0.1]
         for c in cluster_indices:
-            colors[points_to_cloud_map[c]] = rgb
+            colors[c] = rgb
 
         cloud.colors = o3d.utility.Vector3dVector(colors)
 
