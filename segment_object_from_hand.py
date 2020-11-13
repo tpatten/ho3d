@@ -32,9 +32,9 @@ class ObjectSegmenter:
             # For each frame in the sequence
             f_count = 0
             for frame in frames:
-                _, rgb_img, cloud, pts_to_pixels, hand_mask = seg.load_data(seq, frame)
-                object_indices = seg.segment_frame(cloud, hand_mask)
-                object_mask = seg.points_to_mask(rgb_img, hand_mask, cloud, pts_to_pixels, object_indices)
+                _, rgb_img, cloud, pts_to_pixels, hand_mask = self.load_data(seq, frame)
+                object_indices = self.segment_frame(cloud, hand_mask)
+                object_mask = self.points_to_mask(rgb_img, hand_mask, cloud, pts_to_pixels, object_indices)
                 f_count += 1
                 if (f_count % 25) == 0:
                     print(' -- {}'.format(f_count))
@@ -250,6 +250,6 @@ if __name__ == '__main__':
     args.visualize = False
     args.save = True
 
-    # Create the reconstruction
+    # Segment the objects
     seg = ObjectSegmenter(args)
     seg.process()
