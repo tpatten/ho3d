@@ -31,85 +31,98 @@ def get_outliers(points, outlier_rm_nb_neighbors, outlier_rm_std_ratio):
 
 
 # Path and file names
-data_dir = '/home/tpatten/Code/if-net/shapenet/data/ho3d/ho3d_AnnoPoses'
-v4r_dir = '/home/tpatten/v4rtemp/datasets/HandTracking/HO3D_v2/train'
-scene_id = 'SS2'
-mesh_name_1 = 'mesh.ply'
-mesh_name_2 = 'ifnet_recon_bop_clean.off'
-mesh_name_3 = '_AnnoPoses_tsdf_aligned_clean_poisson.ply'
+ifnet_dir = '/home/tpatten/Code/if-net/shapenet/data/ho3d/obj_learn'
+ho3d_dir = '/home/tpatten/Data/Hands/HO3D_V2/HO3D_v2/reconstructions'
+scene_id = 'GPMF12'
+mesh_tsdf = 'mesh.ply'
+mesh_ifnet = 'ifnet_recon_bop_clean.off'
+mesh_poisson = '_AnnoPoses_tsdf_aligned_clean_poisson.ply'
 visualize = True
 downsample_size = 5
-mesh1to2_dist_threshold = 5.0
+tsdf_to_ifnet_dist_threshold = 5.0
 distance_thresholds = [5.0, 20.0]
 outlier_rm_std_ratio = 0.5
 outlier_rm_nb_neighbors = 100
 
 # Load meshes
-mesh1 = o3d.io.read_triangle_mesh(os.path.join(data_dir, scene_id, mesh_name_1))
-mesh2 = o3d.io.read_triangle_mesh(os.path.join(data_dir, scene_id, mesh_name_2))
-mesh3 = o3d.io.read_triangle_mesh(os.path.join(v4r_dir, scene_id + mesh_name_3))
+mesh_tsdf = o3d.io.read_triangle_mesh(os.path.join(ifnet_dir, scene_id + '_300', mesh_tsdf))
+mesh_ifnet_300 = o3d.io.read_triangle_mesh(os.path.join(ifnet_dir, scene_id + '_300', mesh_ifnet))
+mesh_ifnet_3000 = o3d.io.read_triangle_mesh(os.path.join(ifnet_dir, scene_id + '_3000', mesh_ifnet))
+mesh_poisson = o3d.io.read_triangle_mesh(os.path.join(ho3d_dir, scene_id + mesh_poisson))
+
+#o3d.visualization.draw_geometries([mesh_tsdf, mesh_ifnet_300, mesh_ifnet_3000, mesh_poisson])
+#import sys
+#sys.exit(0)
 
 # Get the points
-points1 = np.asarray(mesh1.vertices)
-points2 = np.asarray(mesh2.vertices)
-points3 = np.asarray(mesh3.vertices)
+points_tsdf = np.asarray(mesh_tsdf.vertices)
+points_ifnet = np.concatenate((np.asarray(mesh_ifnet_300.vertices), np.asarray(mesh_ifnet_3000.vertices)))
+#points_ifnet = np.asarray(mesh_ifnet_3000.vertices)
+points_poisson = np.asarray(mesh_poisson.vertices)
 
-# KD tree of mesh2
-pcd2 = o3d.geometry.PointCloud()
-pcd2.points = o3d.utility.Vector3dVector(np.copy(points2))
-kd_tree2 = o3d.geometry.KDTreeFlann(pcd2)
+# Clean up the tsdf points
+pcd_temp = o3d.geometry.PointCloud()
+pcd_temp.points = o3d.utility.Vector3dVector(np.asarray(mesh_tsdf.vertices))
+outlier_rm_nb_neighbors = 50  # Higher is more aggressive 50
+outlier_rm_std_ratio = 0.01  # Smaller is more aggressive 0.01
+pcd_temp, _ = pcd_temp.remove_statistical_outlier(
+    nb_neighbors=outlier_rm_nb_neighbors, std_ratio=outlier_rm_std_ratio)
+points_tsdf = np.asarray(pcd_temp.voxel_down_sample(voxel_size=downsample_size).points)
+#points_tsdf = np.asarray(pcd_temp.points)
 
-# Find points in mesh1 that should be removed because far from mesh2
+# Clean up the if-net points
+pcd_temp.points = o3d.utility.Vector3dVector(points_ifnet)
+#pcd_temp, _ = pcd_temp.remove_statistical_outlier(
+#    nb_neighbors=outlier_rm_nb_neighbors, std_ratio=outlier_rm_std_ratio)
+#points_ifnet = np.asarray(pcd_temp.voxel_down_sample(voxel_size=downsample_size).points)
+points_ifnet = np.asarray(pcd_temp.points)
+
+# KD tree of ifnet meshes
+pcd_ifnet = o3d.geometry.PointCloud()
+pcd_ifnet.points = o3d.utility.Vector3dVector(np.copy(points_ifnet))
+kd_tree_ifnet = o3d.geometry.KDTreeFlann(pcd_ifnet)
+
+# Find points in the TSDF reconstruction that should be removed because far from the IF-Net reconstructions
 remove_points = []
-for i in range(points1.shape[0]):
-    pt = np.copy(points1[i, :])
-    [_, idx, _] = kd_tree2.search_knn_vector_3d(pt, 1)
-    obj_pt = np.asarray(pcd2.points)[idx[0], :]
+for i in range(points_tsdf.shape[0]):
+    pt = np.copy(points_tsdf[i, :])
+    [_, idx, _] = kd_tree_ifnet.search_knn_vector_3d(pt, 1)
+    obj_pt = np.asarray(pcd_ifnet.points)[idx[0], :]
     dd = np.linalg.norm(pt - obj_pt)
-    if dd > mesh1to2_dist_threshold:
+    if dd > tsdf_to_ifnet_dist_threshold:
         remove_points.append(pt)
-        points1[i, :] = [np.nan, np.nan, np.nan]
+        points_tsdf[i, :] = [np.nan, np.nan, np.nan]
 
 # Remove all outliers from the points
-points1 = points1[~np.isnan(points1).any(axis=1)]
+points_tsdf = points_tsdf[~np.isnan(points_tsdf).any(axis=1)]
 
-# Make KD trees for the search through mesh1 and mesh3
-pcd1 = o3d.geometry.PointCloud()
-pcd1.points = o3d.utility.Vector3dVector(np.copy(points1))
-kd_tree1 = o3d.geometry.KDTreeFlann(pcd1)
-pcd3 = o3d.geometry.PointCloud()
-pcd3.points = o3d.utility.Vector3dVector(np.copy(points3))
-kd_tree3 = o3d.geometry.KDTreeFlann(pcd3)
+# Make KD trees for the search through the TSDF reconstruction and the poisson reconstruction
+pcd_tsdf = o3d.geometry.PointCloud()
+pcd_tsdf.points = o3d.utility.Vector3dVector(np.copy(points_tsdf))
+kd_tree_tsdf = o3d.geometry.KDTreeFlann(pcd_tsdf)
+pcd_poisson = o3d.geometry.PointCloud()
+pcd_poisson.points = o3d.utility.Vector3dVector(np.copy(points_poisson))
+kd_tree_poisson = o3d.geometry.KDTreeFlann(pcd_poisson)
 
-# Get a convex hull of mesh1
-ch1, ch_idxs1 = pcd1.compute_convex_hull()
+# Get a convex hull of the TSDF reconstruction
+ch1, ch_idxs1 = pcd_tsdf.compute_convex_hull()
 
-# Find points in mesh2 that should be added to mesh1
-points2 = np.asarray(pcd2.voxel_down_sample(voxel_size=downsample_size).points)
+# Find points in the IF-Net reconstructions that should be added to the mesh
+points_ifnet = np.asarray(pcd_ifnet.voxel_down_sample(voxel_size=downsample_size).points)
 new_points = []
-for pt in points2:
-    '''
-    [_, idx, _] = kd_tree1.search_knn_vector_3d(pt, 1)
-    obj_pt = np.asarray(pcd1.points)[idx[0], :]
-    dd = np.linalg.norm(pt - obj_pt)
-    if 5.0 < dd < 20.0:
-        # Check if it is in the convex hull
-        if not point_in_hull(pt, points1, ch_idxs1):
-            # Add point to the cloud
-            new_points.append(pt)
-    '''
+for pt in points_ifnet:
     # If the point is outside the convex hull, then add it immediately
-    if not point_in_hull(pt, points1, ch_idxs1):
+    if not point_in_hull(pt, points_tsdf, ch_idxs1):
         new_points.append(pt)
     # Otherwise, the point can be inside but must be far from the original mesh, yet close to the poisson reconstruction
     else:
-        [_, idx1, _] = kd_tree1.search_knn_vector_3d(pt, 1)
-        obj_pt1 = np.asarray(pcd1.points)[idx1[0], :]
+        [_, idx1, _] = kd_tree_tsdf.search_knn_vector_3d(pt, 1)
+        obj_pt1 = np.asarray(pcd_tsdf.points)[idx1[0], :]
         d1 = np.linalg.norm(pt - obj_pt1)
-        [_, idx3, _] = kd_tree3.search_knn_vector_3d(pt, 1)
-        obj_pt3 = np.asarray(pcd3.points)[idx3[0], :]
+        [_, idx3, _] = kd_tree_poisson.search_knn_vector_3d(pt, 1)
+        obj_pt3 = np.asarray(pcd_poisson.points)[idx3[0], :]
         d3 = np.linalg.norm(pt - obj_pt3)
-        if d1 > 10.0 and d3 < 10.0:
+        if d1 > distance_thresholds[0] and d3 < distance_thresholds[1]:
             new_points.append(pt)
 
 # Display the points
@@ -120,16 +133,16 @@ if len(remove_points) > 0:
     rem_pcd = o3d.geometry.PointCloud()
     rem_pcd.points = o3d.utility.Vector3dVector(np.asarray(remove_points))
     rem_pcd.paint_uniform_color([0.7, 0.2, 0.2])
-pcd1.paint_uniform_color([0.5, 0.5, 0.5])
+pcd_tsdf.paint_uniform_color([0.5, 0.5, 0.5])
 
 # Visualize
 if visualize:
     if len(remove_points) > 0:
-        o3d.visualization.draw_geometries([pcd1, new_pcd, rem_pcd])
+        o3d.visualization.draw_geometries([pcd_tsdf, new_pcd, rem_pcd])
     else:
-        o3d.visualization.draw_geometries([pcd1, new_pcd])
+        o3d.visualization.draw_geometries([pcd_tsdf, new_pcd])
 
 # Save
 merged_pcd = o3d.geometry.PointCloud()
-merged_pcd.points = o3d.utility.Vector3dVector(np.append(points1, np.asarray(new_points), axis=0))
-o3d.io.write_point_cloud(os.path.join(data_dir, scene_id, 'mesh_cloud.ply'), merged_pcd)
+merged_pcd.points = o3d.utility.Vector3dVector(np.append(points_tsdf, np.asarray(new_points), axis=0))
+o3d.io.write_point_cloud(os.path.join(ho3d_dir, scene_id + '_merged.ply'), merged_pcd)
