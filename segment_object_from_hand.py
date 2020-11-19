@@ -17,8 +17,9 @@ class ObjectSegmenter:
         root_dir = os.path.join(self.base_dir, self.data_split)
         dirs = [o for o in os.listdir(root_dir) if os.path.isdir("{}/{}".format(root_dir, o))]
         dirs.sort()
+        dirs = ['000003', '000008']
 
-        for seq in dirs[2:]:
+        for seq in dirs:
             # Directory where the date for this sequence is
             seq_dir = os.path.join(root_dir, seq)
             print('Processing {}'.format(seq_dir))
@@ -244,9 +245,9 @@ if __name__ == '__main__':
     # Parse the arguments
     parser = argparse.ArgumentParser(description='HO-3D Object segmentation')
     args = parser.parse_args()
-    args.output_dir = 'masks_hs_dc'
-    args.ho3d_path = '/home/tpatten/Data/bop_test/ho3dbop'
-    args.split = 'test'
+    args.output_dir = 'mask_hsdc'
+    args.ho3d_path = '/home/tpatten/Data/bop_test/ho3d'
+    args.split = 'train'
     args.visualize = False
     args.save = True
 

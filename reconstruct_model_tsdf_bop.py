@@ -10,6 +10,7 @@ import transforms3d as tf3d
 from enum import IntEnum
 import json
 from scipy.spatial.transform.rotation import Rotation
+import pcl
 
 
 OBJECT_MASK_VISIBLE_DIR = 'object_vis'
@@ -48,6 +49,7 @@ class ModelReconstructor:
             self.erosion_kernel['hand'] = np.ones((args.mask_erosion_kernel[1], args.mask_erosion_kernel[1]), np.uint8)
         self.volume = None
         self.pose_annotation_global_rot = np.eye(3)
+        self.pose_annotation_global_tra = np.asarray([0., 0., 0.])
 
         # Load the rendering scores file
         if os.path.isfile(self.args.hand_obj_rendering_scores):
@@ -109,7 +111,7 @@ class ModelReconstructor:
                 normals = np.asarray(loaded_pcd.normals)
 
                 if self.args.model_file == '':
-                    filename = os.path.join(self.base_dir, self.data_split,
+                    filename = os.path.join(self.base_dir, 'reconstructions',
                                             self.args.scene + '_' + str(self.args.reg_method).split('.')[1])
                     if self.args.reg_method == RegMethod.GT_ICP or self.args.reg_method == RegMethod.GT_ICP_FULL:
                         filename += '_' + str(self.args.icp_method).split('.')[1]
@@ -121,12 +123,11 @@ class ModelReconstructor:
                         filename += '_renFilter'
 
                     if self.args.viewpoint_file != '':
-                        filename = os.path.join(self.base_dir, self.data_split,
+                        filename = os.path.join(self.base_dir, 'reconstructions',
                                                 self.args.scene + '_' + str(self.args.viewpoint_file).split('.')[0])
 
                     if self.args.pose_annotation_file != '':
-                        filename = os.path.join(self.base_dir, self.data_split,
-                                                self.args.scene + '_AnnoPoses')
+                        filename = os.path.join(self.base_dir, 'reconstructions', self.args.scene + '_AnnoPoses')
 
                     if self.args.apply_inpainting:
                         filename += '_inPaint'
@@ -189,8 +190,7 @@ class ModelReconstructor:
         # Save
         combined_pcd = None
         if self.args.save:
-            base_dir = os.path.join(self.base_dir, self.data_split)
-            combined_pcd = self.save_clouds_and_camera_poses(base_dir, processed_frames, cam_poses, est_cam_poses,
+            combined_pcd = self.save_clouds_and_camera_poses(self.base_dir, processed_frames, cam_poses, est_cam_poses,
                                                              mask_pcds, tsdf_mesh, mesh_aligned=tsdf_mesh_aligned)
 
         # Visualize
@@ -250,6 +250,7 @@ class ModelReconstructor:
             if self.args.align_to_cad:
                 _, _, anno, _ = self.load_data(scene_id, frame_ids[0].split('.')[0])
                 self.pose_annotation_global_rot = cv2.Rodrigues(anno['objRot'])[0].T
+                self.pose_annotation_global_tra = anno['objTrans']
 
         # Load the camera parameters
         cam_params = self.read_camera_intrinsics(scene_id)
@@ -423,11 +424,11 @@ class ModelReconstructor:
             #if counter > 3:
             #    break
 
-            # Save intermediate results
-            if self.args.save and self.args.save_intermediate and num_processed % 20 == 0:
-                base_dir = os.path.join(self.base_dir, self.data_split, scene_id)
-                self.save_clouds_and_camera_poses(base_dir, processed_frames, cam_poses, est_cam_poses, mask_pcds,
-                                                  frame_id=frame_id)
+            ## Save intermediate results
+            #if self.args.save and self.args.save_intermediate and num_processed % 20 == 0:
+            #    base_dir = os.path.join(self.base_dir, self.data_split, scene_id)
+            #    self.save_clouds_and_camera_poses(base_dir, processed_frames, cam_poses, est_cam_poses, mask_pcds,
+            #                                      frame_id=frame_id)
 
         print('Processed {} frames out of {}'.format(num_processed, len(frame_ids)))
 
@@ -456,37 +457,66 @@ class ModelReconstructor:
         mask = None
         hand = None
 
-        # If my masks
-        if self.mask_dir == OBJECT_MASK_VISIBLE_DIR:
-            mask_filename = os.path.join(self.base_dir, self.data_split, scene_id, 'mask',
-                                         self.mask_dir, str(frame_id) + '.png')
-            if not os.path.exists(mask_filename):
-                return mask, hand
+        # BOP directory
+        bop_dir = '/home/tpatten/Data/bop_test/ho3d/'
+        ho3d_to_bop = {'ABF10': '000001', 'ABF11': '000002', 'ABF12': '000003', 'BB12': '000008', 'GPMF12': '000013',
+                       'GSF12': '000018', 'MC1': '000021', 'MC4': '000023', 'MDF12': '000028', 'SB12': '000033',
+                       'SM2': '000035', 'SM3': '000036', 'SMu1': '000039', 'SMu40': '000040', 'SS1': '000043',
+                       'ShSu12': '000047', 'SiBF12': '000052'}
 
-            mask = cv2.imread(mask_filename)[:, :, 0]
-        # Otherwise, ho3d masks
-        else:
-            # Load the mask file
-            mask_filename = os.path.join(self.mask_dir, self.data_split, scene_id, 'seg', str(frame_id) + '.jpg')
+        mask_filename = os.path.join(bop_dir, self.data_split, ho3d_to_bop[scene_id], self.mask_dir,
+                                     str(frame_id).zfill(6) + '.png')
+        hand_filename = os.path.join(bop_dir, self.data_split, ho3d_to_bop[scene_id], 'hand-seg-tpv',
+                                     str(frame_id).zfill(6) + '.png')
 
-            if not os.path.exists(mask_filename):
-                return mask, hand
+        if not os.path.exists(mask_filename):
+            print('No mask file: {}'.format(mask_filename))
+            return mask, hand
 
-            mask_rgb = cv2.imread(mask_filename)
+        if not os.path.exists(hand_filename):
+            print('No hand mask file: {}'.format(hand_filename))
+            return mask, hand
 
-            # Generate binary mask
-            mask = np.zeros((mask_rgb.shape[0], mask_rgb.shape[1]))
-            hand = np.zeros((mask_rgb.shape[0], mask_rgb.shape[1]))
-            for u in range(mask_rgb.shape[0]):
-                for v in range(mask_rgb.shape[1]):
-                    if mask_rgb[u, v, 0] > 230 and mask_rgb[u, v, 1] < 10 and mask_rgb[u, v, 2] < 10:
-                        mask[u, v] = 255
-                    if mask_rgb[u, v, 0] < 10 and mask_rgb[u, v, 1] < 10 and mask_rgb[u, v, 2] > 230:
-                        hand[u, v] = 255
+        # Load the mask file
+        mask = cv2.imread(mask_filename)[:, :, 0]
 
-            # Resize image to original size
-            mask = cv2.resize(mask, (self.rgb.shape[1], self.rgb.shape[0]), interpolation=cv2.INTER_NEAREST)
-            hand = cv2.resize(hand, (self.rgb.shape[1], self.rgb.shape[0]), interpolation=cv2.INTER_NEAREST)
+        # Load the mask hand file
+        hand = cv2.imread(hand_filename)[:, :, 0]
+
+        # Apply erosion
+        if self.erosion_kernel['obj'] is not None:
+            mask = cv2.erode(mask, self.erosion_kernel['obj'], iterations=1)
+        if self.erosion_kernel['hand'] is not None:
+            hand = cv2.dilate(hand, self.erosion_kernel['hand'], iterations=1)
+
+        return mask, hand
+
+    def load_mask_ho3d(self, scene_id, frame_id):
+        mask = None
+        hand = None
+
+        # Load the mask file
+        mask_dir = '/home/tpatten/Data/Hands/HO3D_V2/HO3D_v2_segmentations_rendered/'
+        mask_filename = os.path.join(mask_dir, self.data_split, scene_id, 'seg', str(frame_id) + '.jpg')
+
+        if not os.path.exists(mask_filename):
+            return mask, hand
+
+        mask_rgb = cv2.imread(mask_filename)
+
+        # Generate binary mask
+        mask = np.zeros((mask_rgb.shape[0], mask_rgb.shape[1]))
+        hand = np.zeros((mask_rgb.shape[0], mask_rgb.shape[1]))
+        for u in range(mask_rgb.shape[0]):
+            for v in range(mask_rgb.shape[1]):
+                if mask_rgb[u, v, 0] > 230 and mask_rgb[u, v, 1] < 10 and mask_rgb[u, v, 2] < 10:
+                    mask[u, v] = 255
+                if mask_rgb[u, v, 0] < 10 and mask_rgb[u, v, 1] < 10 and mask_rgb[u, v, 2] > 230:
+                    hand[u, v] = 255
+
+        # Resize image to original size
+        mask = cv2.resize(mask, (self.rgb.shape[1], self.rgb.shape[0]), interpolation=cv2.INTER_NEAREST)
+        hand = cv2.resize(hand, (self.rgb.shape[1], self.rgb.shape[0]), interpolation=cv2.INTER_NEAREST)
 
         # Apply erosion
         if self.erosion_kernel['obj'] is not None:
@@ -851,12 +881,15 @@ class ModelReconstructor:
             YCB_MODELS_DIR, 'models', model_name_data[scene_key]['ycbv'], 'mesh.ply')
         target = o3d.io.read_point_cloud(ycb_model_filename)
 
+        points = copy.deepcopy(np.asarray(mesh_tsdf.vertices))
+
         # Create a point cloud from the mesh and initially align it to the global frame
         source = o3d.geometry.PointCloud()
-        points = copy.deepcopy(np.asarray(mesh_tsdf.vertices))
+        #points = np.matmul(points, np.linalg.inv(self.pose_annotation_global_rot))
+        #centroid = np.mean(points, axis=0)
+        #points -= centroid
+        points -= self.pose_annotation_global_tra
         points = np.matmul(points, np.linalg.inv(self.pose_annotation_global_rot))
-        centroid = np.mean(points, axis=0)
-        points -= centroid
         source.points = o3d.utility.Vector3dVector(points)
 
         # Run ICP to align the mesh to the model
@@ -953,7 +986,8 @@ class ModelReconstructor:
             normals = np.asarray(down_pcd.normals)
 
         # Create the filename and write the data
-        filename = os.path.join(base_dir, self.args.scene + '_' + str(self.args.reg_method).split('.')[1])
+        filename = os.path.join(self.base_dir, 'reconstructions',
+                                self.args.scene + '_' + str(self.args.reg_method).split('.')[1])
         if self.args.reg_method == RegMethod.GT_ICP or self.args.reg_method == RegMethod.GT_ICP_FULL:
             filename += '_' + str(self.args.icp_method).split('.')[1]
         filename += '_start' + str(self.args.start_frame) + '_max' + str(self.args.max_num) +\
@@ -964,12 +998,11 @@ class ModelReconstructor:
             filename += '_renFilter'
 
         if self.args.viewpoint_file != '':
-            filename = os.path.join(self.base_dir, self.data_split,
+            filename = os.path.join(self.base_dir, 'reconstructions',
                                     self.args.scene + '_' + str(self.args.viewpoint_file).split('.')[0])
 
         if self.args.pose_annotation_file != '':
-            filename = os.path.join(self.base_dir, self.data_split,
-                                    self.args.scene + '_AnnoPoses')
+            filename = os.path.join(self.base_dir, 'reconstructions', self.args.scene + '_AnnoPoses')
 
         if self.args.apply_inpainting:
             filename += '_inPaint'
@@ -1073,16 +1106,12 @@ if __name__ == '__main__':
     parser.add_argument("scene", type=str, help="Sequence of the dataset")
     parser.add_argument("--min_ratio_valid", type=float, default=0.1, help="The threshold at which visibility is set")
     args = parser.parse_args()
-    # args.ho3d_path = '/home/tpatten/Data/Hands/HO3D/'
-    # args.ho3d_path = '/home/tpatten/v4rtemp/datasets/HandTracking/HO3D_v2'
     args.ho3d_path = '/home/tpatten/Data/Hands/HO3D_V2/HO3D_v2'
     args.model_file = ''
-    # args.model_file = '/home/tpatten/Data/Hands/HO3D/train/ABF10/GT_start0_max-1_skip1.xyz'
-    # args.mask_dir = OBJECT_MASK_VISIBLE_DIR
-    args.mask_dir = '/home/tpatten/Data/Hands/HO3D_V2/HO3D_v2_segmentations_rendered/'
+    args.mask_dir = 'mask_hsdc_ofdd'
     args.hand_obj_rendering_scores = '/home/tpatten/Data/bop/ho3d/hand_obj_ren_scores.json'
     args.viewpoint_file = 'views_Uniform_Segmentation_step0-3.json'
-    args.pose_annotation_file = 'pose_hand_annotation.json'
+    args.pose_annotation_file = 'pair_pose.json'
     args.align_to_cad = True
     args.visualize = False
     args.save = True

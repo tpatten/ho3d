@@ -48,7 +48,7 @@ class OpticalFlowEstimator:
 
                 #break
 
-            break
+            #break
 
     def load_data(self, seq_name, frame_id):
         # RGB
@@ -152,12 +152,12 @@ if __name__ == '__main__':
     # Parse the arguments
     parser = argparse.ArgumentParser(description='HO-3D Optical flow estimation and segmentation')
     args = parser.parse_args()
-    args.output_dir = 'masks_hs_dc_clean'
-    args.mask_dir = 'masks_hs_dc'
-    args.ho3d_path = '/home/tpatten/Data/bop_test/ho3dbop'
-    args.split = 'test'
-    args.visualize = True
-    args.save = False
+    args.output_dir = 'mask_hsdc_ofdd'
+    args.mask_dir = 'mask_hsdc'
+    args.ho3d_path = '/home/tpatten/Data/bop_test/ho3d'
+    args.split = 'train'
+    args.visualize = False
+    args.save = True
 
     # Estimate optical flow and clean segmentation
     ofe = OpticalFlowEstimator(args)
