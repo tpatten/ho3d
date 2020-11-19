@@ -33,14 +33,14 @@ def get_outliers(points, outlier_rm_nb_neighbors, outlier_rm_std_ratio):
 # Path and file names
 ifnet_dir = '/home/tpatten/Code/if-net/shapenet/data/ho3d/obj_learn'
 ho3d_dir = '/home/tpatten/Data/Hands/HO3D_V2/HO3D_v2/reconstructions'
-scene_id = 'GPMF12'
+scene_id = 'SS1'
 mesh_tsdf = 'mesh.ply'
 mesh_ifnet = 'ifnet_recon_bop_clean.off'
 mesh_poisson = '_AnnoPoses_tsdf_aligned_clean_poisson.ply'
 visualize = True
 downsample_size = 5
 tsdf_to_ifnet_dist_threshold = 5.0
-distance_thresholds = [5.0, 20.0]
+distance_thresholds = [15.0, 30.0] #[5.0, 20.0]
 outlier_rm_std_ratio = 0.5
 outlier_rm_nb_neighbors = 100
 
@@ -50,14 +50,14 @@ mesh_ifnet_300 = o3d.io.read_triangle_mesh(os.path.join(ifnet_dir, scene_id + '_
 mesh_ifnet_3000 = o3d.io.read_triangle_mesh(os.path.join(ifnet_dir, scene_id + '_3000', mesh_ifnet))
 mesh_poisson = o3d.io.read_triangle_mesh(os.path.join(ho3d_dir, scene_id + mesh_poisson))
 
-#o3d.visualization.draw_geometries([mesh_tsdf, mesh_ifnet_300, mesh_ifnet_3000, mesh_poisson])
+#o3d.visualization.draw_geometries([mesh_tsdf, mesh_ifnet_300, mesh_ifnet_3000])
 #import sys
 #sys.exit(0)
 
 # Get the points
 points_tsdf = np.asarray(mesh_tsdf.vertices)
 points_ifnet = np.concatenate((np.asarray(mesh_ifnet_300.vertices), np.asarray(mesh_ifnet_3000.vertices)))
-#points_ifnet = np.asarray(mesh_ifnet_3000.vertices)
+#points_ifnet = np.asarray(mesh_ifnet_300.vertices)
 points_poisson = np.asarray(mesh_poisson.vertices)
 
 # Clean up the tsdf points
@@ -65,17 +65,17 @@ pcd_temp = o3d.geometry.PointCloud()
 pcd_temp.points = o3d.utility.Vector3dVector(np.asarray(mesh_tsdf.vertices))
 outlier_rm_nb_neighbors = 50  # Higher is more aggressive 50
 outlier_rm_std_ratio = 0.01  # Smaller is more aggressive 0.01
-pcd_temp, _ = pcd_temp.remove_statistical_outlier(
-    nb_neighbors=outlier_rm_nb_neighbors, std_ratio=outlier_rm_std_ratio)
-points_tsdf = np.asarray(pcd_temp.voxel_down_sample(voxel_size=downsample_size).points)
-#points_tsdf = np.asarray(pcd_temp.points)
+#pcd_temp, _ = pcd_temp.remove_statistical_outlier(
+#    nb_neighbors=outlier_rm_nb_neighbors, std_ratio=outlier_rm_std_ratio)
+#points_tsdf = np.copy(np.asarray(pcd_temp.voxel_down_sample(voxel_size=downsample_size).points))
+points_tsdf = np.copy(np.asarray(pcd_temp.points))
 
 # Clean up the if-net points
 pcd_temp.points = o3d.utility.Vector3dVector(points_ifnet)
 #pcd_temp, _ = pcd_temp.remove_statistical_outlier(
 #    nb_neighbors=outlier_rm_nb_neighbors, std_ratio=outlier_rm_std_ratio)
-#points_ifnet = np.asarray(pcd_temp.voxel_down_sample(voxel_size=downsample_size).points)
-points_ifnet = np.asarray(pcd_temp.points)
+#points_ifnet = np.copy(np.asarray(pcd_temp.voxel_down_sample(voxel_size=downsample_size).points))
+points_ifnet = np.copy(np.asarray(pcd_temp.points))
 
 # KD tree of ifnet meshes
 pcd_ifnet = o3d.geometry.PointCloud()
@@ -117,12 +117,12 @@ for pt in points_ifnet:
     # Otherwise, the point can be inside but must be far from the original mesh, yet close to the poisson reconstruction
     else:
         [_, idx1, _] = kd_tree_tsdf.search_knn_vector_3d(pt, 1)
-        obj_pt1 = np.asarray(pcd_tsdf.points)[idx1[0], :]
-        d1 = np.linalg.norm(pt - obj_pt1)
+        obj_pt_tsdf = np.asarray(pcd_tsdf.points)[idx1[0], :]
+        d2tsdf = np.linalg.norm(pt - obj_pt_tsdf)
         [_, idx3, _] = kd_tree_poisson.search_knn_vector_3d(pt, 1)
-        obj_pt3 = np.asarray(pcd_poisson.points)[idx3[0], :]
-        d3 = np.linalg.norm(pt - obj_pt3)
-        if d1 > distance_thresholds[0] and d3 < distance_thresholds[1]:
+        obj_pt_poisson = np.asarray(pcd_poisson.points)[idx3[0], :]
+        d2poisson = np.linalg.norm(pt - obj_pt_poisson)
+        if d2tsdf > distance_thresholds[0] and d2poisson < distance_thresholds[1]:
             new_points.append(pt)
 
 # Display the points

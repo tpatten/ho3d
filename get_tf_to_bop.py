@@ -7,7 +7,7 @@ import numpy as np
 import copy
 
 ho3d_dir = '/home/tpatten/Data/Hands/HO3D_V2/HO3D_v2'
-scene_id = 'ABF12'
+scene_id = 'GPMF12'
 pose_annotation_file = 'pair_pose.json'
 ho3d_to_ycb_map_path = '/home/tpatten/Data/Hands/HO3D/ho3d_to_ycb.json'
 ycb_models_dir = '/home/tpatten/Data/Hands/HO3D_V2/HO3D_v2/'
