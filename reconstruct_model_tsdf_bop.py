@@ -336,8 +336,44 @@ class ModelReconstructor:
                     if self.args.visualize_inpainting:
                         img_output = np.vstack((np.hstack((self.depth, masked_depth)),
                                                 np.hstack((rendered_depth, filled_depth))))
+                        #img_output = rendered_depth
                         cv2.imshow('Depth image', img_output)
                         cv2.waitKey(0)
+                        #cv2.destroyAllWindows()
+
+                        # Visualize an image showing the difference between the filled depth and the rendered depth
+                        d_diff = np.abs(rendered_depth - filled_depth)
+                        d_diff[filled_depth == 0] = 0.0
+                        # d_diff = cv2.normalize(d_diff, d_diff, 0, 255, cv2.NORM_MINMAX)
+                        # print(d_diff.min(), d_diff.max(), d_diff.dtype, d_diff.shape)
+                        rgb_overlay = np.copy(self.rgb)
+                        for u in range(d_diff.shape[0]):
+                            for v in range(d_diff.shape[1]):
+                                if d_diff[u, v] > 0.005:
+                                    #rgb_overlay[u, v] = [0, 0, d_diff[u, v]]
+                                    rgb_overlay[u, v] = [255, 0, 0]
+
+                        img_output = np.hstack((self.rgb, rgb_overlay))
+                        cv2.imshow('Depth diff image', img_output)
+                        cv2.waitKey(0)
+
+                        new_mask = np.zeros_like(mask)
+                        for u in range(filled_depth.shape[0]):
+                            for v in range(filled_depth.shape[1]):
+                                if filled_depth[u, v] > 0 and d_diff[u, v] < 0.005:
+                                    new_mask[u, v] = 255
+
+                        image1 = np.copy(self.rgb)
+                        image2 = np.copy(self.rgb)
+                        mask1 = mask > 0
+                        mask2 = new_mask > 0
+                        image1[np.invert(mask1)] = image1[np.invert(mask1)] * 0.3
+                        image2[np.invert(mask2)] = image2[np.invert(mask2)] * 0.3
+
+                        img_output = np.hstack((image1, image2))
+                        cv2.imshow('Masks', img_output)
+                        cv2.waitKey(0)
+
                         cv2.destroyAllWindows()
 
                     # Set the depth and remove the mask
@@ -557,15 +593,13 @@ class ModelReconstructor:
 
     def add_objects_to_renderer(self):
         # Get all the .ply files in the model directory
-        # model_dir_name = 'models'
-        model_dir_name = 'reconstructions'
-        #obj_ids = sorted(os.listdir(os.path.join(YCB_MODELS_DIR, model_dir_name)))
+        model_dir_name = 'reconstructions_new'
 
         obj_ids = sorted([f for f in os.listdir(os.path.join(YCB_MODELS_DIR, model_dir_name))
                           if os.path.isdir(os.path.join(YCB_MODELS_DIR, model_dir_name, f))])
 
         for obj_id in obj_ids:
-            model_path = os.path.join(os.path.join(YCB_MODELS_DIR, model_dir_name), obj_id, 'mesh.ply')
+            model_path = os.path.join(os.path.join(YCB_MODELS_DIR, model_dir_name), obj_id, 'mesh_for_rendering.ply')
             print('model_path', model_path)
             self.renderer.add_object(obj_id.replace('.ply', ''), model_path, surf_color=None)
 
@@ -598,6 +632,7 @@ class ModelReconstructor:
         depth_rendered = depth_rendered.flatten()
         mask_hand = mask_hand.flatten()
         depth_filled = np.copy(depth_masked).flatten()
+        '''
         for i in range(len(depth_rendered)):
             #if depth_filled[i] == 0 and depth_rendered[i] > 0 and \
             #   np.abs(depth_rendered[i] - depth[i]) < 0.1:# and depth[i] < 0.5:
@@ -611,6 +646,22 @@ class ModelReconstructor:
                     # Invalid because of misaligned mask (depth[i] ~= depth_rendered[i]) -> fill with original depth
                     if depth[i] > depth_rendered[i] and np.abs(depth_rendered[i] - depth[i]) < 0.1:
                         depth_filled[i] = depth[i]
+        '''
+
+        for i in range(len(depth_rendered)):
+            # Remove all depth values that are not in the rendered depth
+            if depth_filled[i] > 0 and depth_rendered[i] == 0:
+                depth_filled[i] = 0.0
+            #'''
+            if depth_filled[i] == 0 and depth_rendered[i] > 0:
+                # Only fill in the depth if this is not a hand pixel or if not background
+                if mask_hand[i] == 0 and depth[i] < 0.5:
+                    # Invalid because of misaligned mask (depth[i] ~= depth_rendered[i]) -> fill with original depth
+                    if depth[i] == 0:
+                       depth_filled[i] = depth_rendered[i]
+                    if depth[i] > depth_rendered[i] and np.abs(depth_rendered[i] - depth[i]) < 0.1:
+                        depth_filled[i] = depth[i]
+            #'''
 
         # Reshape back to input shape
         depth = depth_rendered.reshape(depth_masked.shape)
@@ -1117,8 +1168,8 @@ if __name__ == '__main__':
     args.viewpoint_file = 'views_Uniform_Segmentation_step0-3.json'
     args.pose_annotation_file = 'pair_pose.json'
     args.align_to_cad = True
-    args.visualize = True
-    args.save = False
+    args.visualize = False
+    args.save = True
     args.save_intermediate = False
     args.icp_method = ICPMethod.Point2Plane
     # Point2Point=1, Point2Plane=2
@@ -1142,7 +1193,7 @@ if __name__ == '__main__':
     # args.min_ratio_valid = 0.10
     args.apply_inpainting = True
     args.inpaint_with_rendering = True
-    args.visualize_inpainting = True
+    args.visualize_inpainting = False
 
     # Create the reconstruction
     reconstructor = ModelReconstructor(args)

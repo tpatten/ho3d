@@ -504,9 +504,13 @@ class ModelReconstructor:
             pose = np.eye(4)
             pose[:3, :3] = cv2.Rodrigues(self.anno['objRot'])[0]
             pose[:3, 3] = self.anno['objTrans']
+            print('Using HO-3D pose')
+            print(pose)
         else:
             pose = np.asarray(pose_in_frames[frame_id]).reshape((4, 4))
             do_inverse = True
+            print('Using pose annotation')
+            print(pose)
 
         # From OpenGL coordinates
         rotx = np.eye(4)
@@ -520,6 +524,9 @@ class ModelReconstructor:
         # fx, fy, cx, cy = cam_intrinsics[0, 0], cam_intrinsics[1, 1], cam_intrinsics[0, 2], cam_intrinsics[1, 2]
         fx, fy = cam_intrinsics.get_focal_length()
         cx, cy = cam_intrinsics.get_principal_point()
+        print(self.anno['objName'])
+        print(fx, fy, cx, cy)
+        print(pose)
         rendering = self.renderer.render_object(self.anno['objName'], pose[:3, :3], pose[:3, 3], fx, fy, cx, cy)
         depth = rendering['depth']
 
@@ -529,7 +536,8 @@ class ModelReconstructor:
         # Get all the .ply files in the model directory
         # model_dir_name = 'models'
         model_dir_name = 'reconstructions'
-        obj_ids = sorted(os.listdir(os.path.join(YCB_MODELS_DIR, model_dir_name)))
+        obj_ids = sorted([f for f in os.listdir(os.path.join(YCB_MODELS_DIR, model_dir_name))
+                          if os.path.isdir(os.path.join(YCB_MODELS_DIR, model_dir_name, f))])
         for obj_id in obj_ids:
             model_path = os.path.join(os.path.join(YCB_MODELS_DIR, model_dir_name), obj_id, 'mesh.ply')
             print('model_path', model_path)
@@ -1084,8 +1092,8 @@ if __name__ == '__main__':
     args.viewpoint_file = 'views_Uniform_Segmentation_step0-3.json'
     args.pose_annotation_file = 'pose_hand_annotation.json'
     args.align_to_cad = True
-    args.visualize = False
-    args.save = True
+    args.visualize = True
+    args.save = False
     args.save_intermediate = False
     args.icp_method = ICPMethod.Point2Plane
     # Point2Point=1, Point2Plane=2
@@ -1107,9 +1115,9 @@ if __name__ == '__main__':
     args.construct_tsdf = True
     args.min_num_pixels = 8000
     # args.min_ratio_valid = 0.10
-    args.apply_inpainting = False
-    args.inpaint_with_rendering = False
-    args.visualize_inpainting = False
+    args.apply_inpainting = True
+    args.inpaint_with_rendering = True
+    args.visualize_inpainting = True
 
     # Create the reconstruction
     reconstructor = ModelReconstructor(args)
