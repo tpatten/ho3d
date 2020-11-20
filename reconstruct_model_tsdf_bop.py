@@ -559,7 +559,11 @@ class ModelReconstructor:
         # Get all the .ply files in the model directory
         # model_dir_name = 'models'
         model_dir_name = 'reconstructions'
-        obj_ids = sorted(os.listdir(os.path.join(YCB_MODELS_DIR, model_dir_name)))
+        #obj_ids = sorted(os.listdir(os.path.join(YCB_MODELS_DIR, model_dir_name)))
+
+        obj_ids = sorted([f for f in os.listdir(os.path.join(YCB_MODELS_DIR, model_dir_name))
+                          if os.path.isdir(os.path.join(YCB_MODELS_DIR, model_dir_name, f))])
+
         for obj_id in obj_ids:
             model_path = os.path.join(os.path.join(YCB_MODELS_DIR, model_dir_name), obj_id, 'mesh.ply')
             print('model_path', model_path)
@@ -1113,8 +1117,8 @@ if __name__ == '__main__':
     args.viewpoint_file = 'views_Uniform_Segmentation_step0-3.json'
     args.pose_annotation_file = 'pair_pose.json'
     args.align_to_cad = True
-    args.visualize = False
-    args.save = True
+    args.visualize = True
+    args.save = False
     args.save_intermediate = False
     args.icp_method = ICPMethod.Point2Plane
     # Point2Point=1, Point2Plane=2
@@ -1136,9 +1140,9 @@ if __name__ == '__main__':
     args.construct_tsdf = True
     args.min_num_pixels = 8000
     # args.min_ratio_valid = 0.10
-    args.apply_inpainting = False
-    args.inpaint_with_rendering = False
-    args.visualize_inpainting = False
+    args.apply_inpainting = True
+    args.inpaint_with_rendering = True
+    args.visualize_inpainting = True
 
     # Create the reconstruction
     reconstructor = ModelReconstructor(args)
