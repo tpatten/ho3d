@@ -17,6 +17,11 @@ OBJECT_MASK_VISIBLE_DIR = 'object_vis'
 COORD_CHANGE_MAT = np.array([[1., 0., 0.], [0, -1., 0.], [0., 0., -1.]], dtype=np.float32)
 ICP_THRESH = 0.02
 YCB_MODELS_DIR = '/home/tpatten/Data/Hands/HO3D_V2/HO3D_v2/'
+bop_dir = '/home/tpatten/Data/bop/ho3d/'
+ho3d_to_bop = {'ABF10': '000001', 'ABF11': '000002', 'ABF12': '000003', 'BB12': '000008', 'GPMF12': '000013',
+               'GSF12': '000018', 'MC1': '000021', 'MC4': '000023', 'MDF12': '000028', 'SB12': '000033',
+               'SM2': '000035', 'SM3': '000036', 'SMu1': '000039', 'SMu40': '000040', 'SS1': '000043',
+               'ShSu12': '000047', 'SiBF12': '000052'}
 
 
 class ICPMethod(IntEnum):
@@ -331,21 +336,33 @@ class ModelReconstructor:
                                                        frame_id=str(int(frame_id)))
                     # Fill the missing values with rendered depth values
                     filled_depth = self.fill_from_rendering(self.depth, masked_depth, rendered_depth, mask_hand)
+                    d_diff = np.abs(rendered_depth - filled_depth)
+                    d_diff[filled_depth == 0] = 0.0
+                    for u in range(filled_depth.shape[0]):
+                        for v in range(filled_depth.shape[1]):
+                            if d_diff[u, v] >= 0.01:  # 0.005
+                                filled_depth[u, v] = 0
+
+                    if self.args.save:
+                        # Save new mask file
+                        new_mask = np.zeros_like(mask)
+                        for u in range(filled_depth.shape[0]):
+                            for v in range(filled_depth.shape[1]):
+                                if filled_depth[u, v] != 0:
+                                    new_mask[u, v] = 255
+                        # Mask file
+                        mask_filename = os.path.join(bop_dir, self.data_split, ho3d_to_bop[scene_id], self.mask_dir,
+                                                     str(frame_id).zfill(6) + '_refined.png')
+                        cv2.imwrite(mask_filename, new_mask)
 
                     # Visualize
                     if self.args.visualize_inpainting:
                         img_output = np.vstack((np.hstack((self.depth, masked_depth)),
                                                 np.hstack((rendered_depth, filled_depth))))
-                        #img_output = rendered_depth
                         cv2.imshow('Depth image', img_output)
                         cv2.waitKey(0)
-                        #cv2.destroyAllWindows()
 
                         # Visualize an image showing the difference between the filled depth and the rendered depth
-                        d_diff = np.abs(rendered_depth - filled_depth)
-                        d_diff[filled_depth == 0] = 0.0
-                        # d_diff = cv2.normalize(d_diff, d_diff, 0, 255, cv2.NORM_MINMAX)
-                        # print(d_diff.min(), d_diff.max(), d_diff.dtype, d_diff.shape)
                         rgb_overlay = np.copy(self.rgb)
                         for u in range(d_diff.shape[0]):
                             for v in range(d_diff.shape[1]):
@@ -492,13 +509,6 @@ class ModelReconstructor:
     def load_mask(self, scene_id, frame_id):
         mask = None
         hand = None
-
-        # BOP directory
-        bop_dir = '/home/tpatten/Data/bop_test/ho3d/'
-        ho3d_to_bop = {'ABF10': '000001', 'ABF11': '000002', 'ABF12': '000003', 'BB12': '000008', 'GPMF12': '000013',
-                       'GSF12': '000018', 'MC1': '000021', 'MC4': '000023', 'MDF12': '000028', 'SB12': '000033',
-                       'SM2': '000035', 'SM3': '000036', 'SMu1': '000039', 'SMu40': '000040', 'SS1': '000043',
-                       'ShSu12': '000047', 'SiBF12': '000052'}
 
         mask_filename = os.path.join(bop_dir, self.data_split, ho3d_to_bop[scene_id], self.mask_dir,
                                      str(frame_id).zfill(6) + '.png')
@@ -657,8 +667,8 @@ class ModelReconstructor:
                 # Only fill in the depth if this is not a hand pixel or if not background
                 if mask_hand[i] == 0 and depth[i] < 0.5:
                     # Invalid because of misaligned mask (depth[i] ~= depth_rendered[i]) -> fill with original depth
-                    if depth[i] == 0:
-                       depth_filled[i] = depth_rendered[i]
+                    #if depth[i] == 0:
+                    #   depth_filled[i] = depth_rendered[i]
                     if depth[i] > depth_rendered[i] and np.abs(depth_rendered[i] - depth[i]) < 0.1:
                         depth_filled[i] = depth[i]
             #'''

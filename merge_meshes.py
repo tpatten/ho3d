@@ -3,6 +3,22 @@ import numpy as np
 import open3d as o3d
 
 
+# Path and file names
+ifnet_dir = '/home/tpatten/Code/if-net/shapenet/data/ho3d/obj_learn_refine'
+ho3d_dir = '/home/tpatten/Data/Hands/HO3D_V2/HO3D_v2/reconstructions'
+scene_id = 'SS1'
+mesh_tsdf = 'mesh.ply'
+mesh_ifnet = 'ifnet_recon_bop_clean.off'
+# mesh_poisson = '_AnnoPoses_tsdf_aligned_clean_poisson.ply'
+mesh_poisson = '_AnnoPoses_inPaintRend_tsdf_aligned_clean_poisson.ply'
+visualize = True
+downsample_size = 5
+tsdf_to_ifnet_dist_threshold = 5.0  # 5.0
+distance_thresholds = [5.0, 20.0]  # [5.0, 20.0]
+outlier_rm_std_ratio = 0.5
+outlier_rm_nb_neighbors = 100
+
+
 def point_in_hull(pt, hull_pts, hull_idxs):
     # Make a new mesh with the new point
     pcd_n = o3d.geometry.PointCloud()
@@ -29,20 +45,6 @@ def get_outliers(points, outlier_rm_nb_neighbors, outlier_rm_std_ratio):
 
     return outliers
 
-
-# Path and file names
-ifnet_dir = '/home/tpatten/Code/if-net/shapenet/data/ho3d/obj_learn'
-ho3d_dir = '/home/tpatten/Data/Hands/HO3D_V2/HO3D_v2/reconstructions'
-scene_id = 'SS1'
-mesh_tsdf = 'mesh.ply'
-mesh_ifnet = 'ifnet_recon_bop_clean.off'
-mesh_poisson = '_AnnoPoses_tsdf_aligned_clean_poisson.ply'
-visualize = True
-downsample_size = 5
-tsdf_to_ifnet_dist_threshold = 5.0
-distance_thresholds = [15.0, 30.0] #[5.0, 20.0]
-outlier_rm_std_ratio = 0.5
-outlier_rm_nb_neighbors = 100
 
 # Load meshes
 mesh_tsdf = o3d.io.read_triangle_mesh(os.path.join(ifnet_dir, scene_id + '_300', mesh_tsdf))
@@ -145,4 +147,4 @@ if visualize:
 # Save
 merged_pcd = o3d.geometry.PointCloud()
 merged_pcd.points = o3d.utility.Vector3dVector(np.append(points_tsdf, np.asarray(new_points), axis=0))
-o3d.io.write_point_cloud(os.path.join(ho3d_dir, scene_id + '_merged.ply'), merged_pcd)
+o3d.io.write_point_cloud(os.path.join(ho3d_dir, scene_id + '_merged_refine.ply'), merged_pcd)
