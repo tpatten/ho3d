@@ -21,7 +21,7 @@ bop_dir = '/home/tpatten/Data/bop/ho3d/'
 ho3d_to_bop = {'ABF10': '000001', 'ABF11': '000002', 'ABF12': '000003', 'BB12': '000008', 'GPMF12': '000013',
                'GSF12': '000018', 'MC1': '000021', 'MC4': '000023', 'MDF12': '000028', 'SB12': '000033',
                'SM2': '000035', 'SM3': '000036', 'SMu1': '000039', 'SMu40': '000040', 'SS1': '000043',
-               'ShSu12': '000047', 'SiBF12': '000052'}
+               'ShSu12': '000047', 'SiBF12': '000052', 'AP12': '000058'}
 
 
 class ICPMethod(IntEnum):
@@ -938,7 +938,7 @@ class ModelReconstructor:
 
     def align_to_cad(self, mesh_tsdf):
         # Load the CAD model to align the mesh to
-        ho3d_to_ycb_map_path = '/home/tpatten/Data/Hands/HO3D/ho3d_to_ycb.json'
+        ho3d_to_ycb_map_path = '/home/tpatten/Data/Hands/HO3D_V2/HO3D_v2/ho3d_to_ycb.json'
         with open(os.path.join(ho3d_to_ycb_map_path)) as f:
             model_name_data = json.load(f)
         scene_key = ''.join([i for i in self.args.scene if not i.isdigit()])

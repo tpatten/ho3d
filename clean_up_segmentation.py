@@ -10,7 +10,7 @@ MASK_HAND_DIR = 'mask_hsdc'
 MASK_PERSON_DIR = 'mask_person'
 MASK_P2P = 'mask_pix2pose'
 HO3D_PATH = '/home/tpatten/Data/bop/ho3d'
-SPLIT = 'test'
+SPLIT = 'train'
 
 
 class CleanUpMode(IntEnum):

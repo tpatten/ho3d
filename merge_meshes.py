@@ -4,14 +4,20 @@ import open3d as o3d
 
 
 # Path and file names
-ifnet_dir = '/home/tpatten/Code/if-net/shapenet/data/ho3d/obj_learn_refine'
+refined = False
+scene_id = 'ShSu12'
+if refined:
+    ifnet_dir = '/home/tpatten/Code/if-net/shapenet/data/ho3d/obj_learn_refine'
+    mesh_poisson = '_AnnoPoses_inPaintRend_tsdf_aligned_clean_poisson.ply'
+else:
+    ifnet_dir = '/home/tpatten/Code/if-net/shapenet/data/ho3d/obj_learn'
+    mesh_poisson = '_AnnoPoses_tsdf_aligned_clean_poisson.ply'
 ho3d_dir = '/home/tpatten/Data/Hands/HO3D_V2/HO3D_v2/reconstructions'
-scene_id = 'SS1'
 mesh_tsdf = 'mesh.ply'
 mesh_ifnet = 'ifnet_recon_bop_clean.off'
-# mesh_poisson = '_AnnoPoses_tsdf_aligned_clean_poisson.ply'
-mesh_poisson = '_AnnoPoses_inPaintRend_tsdf_aligned_clean_poisson.ply'
+
 visualize = True
+save = True
 downsample_size = 5
 tsdf_to_ifnet_dist_threshold = 5.0  # 5.0
 distance_thresholds = [5.0, 20.0]  # [5.0, 20.0]
@@ -126,11 +132,13 @@ for pt in points_ifnet:
         d2poisson = np.linalg.norm(pt - obj_pt_poisson)
         if d2tsdf > distance_thresholds[0] and d2poisson < distance_thresholds[1]:
             new_points.append(pt)
+print('Num new points: {}'.format(len(new_points)))
 
 # Display the points
-new_pcd = o3d.geometry.PointCloud()
-new_pcd.points = o3d.utility.Vector3dVector(np.asarray(new_points))
-new_pcd.paint_uniform_color([0.2, 0.2, 0.7])
+if len(new_points) > 0:
+    new_pcd = o3d.geometry.PointCloud()
+    new_pcd.points = o3d.utility.Vector3dVector(np.asarray(new_points))
+    new_pcd.paint_uniform_color([0.2, 0.2, 0.7])
 if len(remove_points) > 0:
     rem_pcd = o3d.geometry.PointCloud()
     rem_pcd.points = o3d.utility.Vector3dVector(np.asarray(remove_points))
@@ -139,12 +147,24 @@ pcd_tsdf.paint_uniform_color([0.5, 0.5, 0.5])
 
 # Visualize
 if visualize:
-    if len(remove_points) > 0:
+    if len(remove_points) > 0 and len(new_points) > 0:
         o3d.visualization.draw_geometries([pcd_tsdf, new_pcd, rem_pcd])
-    else:
+    elif len(remove_points) > 0:
+        o3d.visualization.draw_geometries([pcd_tsdf, rem_pcd])
+    elif len(new_points) > 0:
         o3d.visualization.draw_geometries([pcd_tsdf, new_pcd])
+    else:
+        o3d.visualization.draw_geometries([pcd_tsdf])
 
 # Save
 merged_pcd = o3d.geometry.PointCloud()
-merged_pcd.points = o3d.utility.Vector3dVector(np.append(points_tsdf, np.asarray(new_points), axis=0))
-o3d.io.write_point_cloud(os.path.join(ho3d_dir, scene_id + '_merged_refine.ply'), merged_pcd)
+if len(new_points) > 0:
+    merged_pcd.points = o3d.utility.Vector3dVector(np.append(points_tsdf, np.asarray(new_points), axis=0))
+else:
+    merged_pcd.points = o3d.utility.Vector3dVector(points_tsdf)
+
+if save:
+    if refined:
+        o3d.io.write_point_cloud(os.path.join(ho3d_dir, scene_id + '_merged_refine_2.ply'), merged_pcd)
+    else:
+        o3d.io.write_point_cloud(os.path.join(ho3d_dir, scene_id + '_merged_2.ply'), merged_pcd)

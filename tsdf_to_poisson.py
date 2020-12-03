@@ -90,7 +90,7 @@ class PoissonSurfaceReconstructor:
         # o3d.visualization.draw_geometries([mesh])
 
         # Second pass applies filter and final Poisson surface reconstruction
-        mesh = self.remove_noise(mesh, mesh_ycb_centroid)
+        #mesh = self.remove_noise(mesh, mesh_ycb_centroid)
         # o3d.visualization.draw_geometries([mesh])
         #  if self.args.model_file[0] == '_':
         # mesh = self.taubin_filer(mesh)
@@ -261,7 +261,7 @@ if __name__ == '__main__':
     args.ho3d_path = '/home/tpatten/Data/bop_test/ho3dbop/reconstructions'
     args.ycb_model_path = '/home/tpatten/Data/Hands/HO3D_V2/HO3D_v2/models'
     args.bop_model_path = '/home/tpatten/Data/bop/ycbv/models_eval'
-    args.ho3d_to_ycb_map_path = '/home/tpatten/Data/Hands/HO3D/ho3d_to_ycb.json'
+    args.ho3d_to_ycb_map_path = '/home/tpatten/Data/Hands/HO3D_V2/HO3D_v2/ho3d_to_ycb.json'
     args.visualize = True
     args.save = True
     args.outlier_rm_nb_neighbors = 50  # Higher is more aggressive

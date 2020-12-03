@@ -7,9 +7,9 @@ import numpy as np
 import copy
 
 ho3d_dir = '/home/tpatten/Data/Hands/HO3D_V2/HO3D_v2'
-scene_id = 'SS1'
+scene_id = 'AP12'
 pose_annotation_file = 'pair_pose.json'
-ho3d_to_ycb_map_path = '/home/tpatten/Data/Hands/HO3D/ho3d_to_ycb.json'
+ho3d_to_ycb_map_path = '/home/tpatten/Data/Hands/HO3D_V2/HO3D_v2/ho3d_to_ycb.json'
 ycb_models_dir = '/home/tpatten/Data/Hands/HO3D_V2/HO3D_v2/'
 bop_model_path = '/home/tpatten/Data/bop/ycbv/models_eval'
 save_to_file = True
@@ -86,6 +86,7 @@ if __name__ == '__main__':
 
     # Run ICP to align the mesh to the model
     threshold = 0.02
+    print(o3d.__version__)
     if o3d.__version__ == '0.7.0.0':
         o3d.geometry.estimate_normals(source, o3d.geometry.KDTreeSearchParamHybrid(radius=0.1, max_nn=30))
         o3d.geometry.estimate_normals(target, o3d.geometry.KDTreeSearchParamHybrid(radius=0.1, max_nn=30))
@@ -95,9 +96,16 @@ if __name__ == '__main__':
     else:
         source.estimate_normals(search_param=o3d.geometry.KDTreeSearchParamHybrid(radius=0.1, max_nn=30))
         target.estimate_normals(search_param=o3d.geometry.KDTreeSearchParamHybrid(radius=0.1, max_nn=30))
-        reg_p2l = o3d.pipelines.registration.registration_icp(
-            source, target, threshold, np.eye(4),
-            o3d.pipelines.registration.TransformationEstimationPointToPlane())
+
+        if o3d.__version__ == '0.10.0.0':
+            reg_p2l = o3d.registration.registration_icp(
+                source, target, threshold, np.eye(4),
+                o3d.registration.TransformationEstimationPointToPlane())
+        else:
+            reg_p2l = o3d.pipelines.registration.registration_icp(
+                source, target, threshold, np.eye(4),
+                o3d.pipelines.registration.TransformationEstimationPointToPlane())
+
     source.transform(reg_p2l.transformation)
     print('TF 2:')
     print(reg_p2l.transformation)
